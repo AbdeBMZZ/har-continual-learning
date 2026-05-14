@@ -204,16 +204,16 @@ by a position-wise feed-forward network (pre-norm residual):
     \label{eq:ffn_res}
 \end{align}
 Multi-head attention with $H = 4$ heads computes:
-\begin{equation}
-    \mathrm{MHA}(\mathbf{Q},\mathbf{K},\mathbf{V}) =
+\begin{align}
+    \mathrm{MHA}(\mathbf{Q},\mathbf{K},\mathbf{V}) &=
     \mathrm{Concat}(\mathrm{head}_1, \ldots, \mathrm{head}_H)\,\mathbf{W}^{O},
-    \quad
-    \mathrm{head}_h = \mathrm{softmax}\!\left(
+    \nonumber \\
+    \mathrm{head}_h &= \mathrm{softmax}\!\left(
         \frac{\mathbf{Q}\mathbf{W}^{Q}_h\,
               \bigl(\mathbf{K}\mathbf{W}^{K}_h\bigr)^{\!\top}}
              {\sqrt{d/H}}
     \right)\mathbf{V}\mathbf{W}^{V}_h
-\end{equation}
+\end{align}
 The feed-forward sub-layer uses GELU activation and inner dimension
 $d_{\mathrm{ff}} = 2d = 256$:
 \begin{equation}
@@ -269,10 +269,10 @@ network architecture.
 
 To mitigate catastrophic forgetting, we maintain a replay buffer
 $\mathcal{M}$ of capacity $|\mathcal{M}| = 2{,}000$ windows using
-class-balanced reservoir sampling. Each class retains at most
-$\lfloor |\mathcal{M}| / |\mathcal{K}| \rfloor$ samples. When a new sample
-$(\mathbf{x}, y)$ arrives for class $c$, it replaces an existing buffer
-entry with probability:
+class-balanced reservoir sampling. Letting $q = \lfloor |\mathcal{M}| / |\mathcal{K}| \rfloor$
+denote the per-class quota, each class retains at most $q$ samples.
+When a new sample $(\mathbf{x}, y)$ arrives for class $c$,
+it replaces an existing buffer entry with probability:
 \begin{equation}
     p_{\mathrm{replace}} =
     \frac{|\mathcal{M}|\,/\,|\mathcal{K}|}{n_c + 1}
