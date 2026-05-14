@@ -109,7 +109,8 @@ def build_anticipation_datasets(X: np.ndarray,
                                  y: np.ndarray,
                                  test_ratio: float = 0.2,
                                  seq_len: int = 5,
-                                 seed: int = 42):
+                                 seed: int = 42,
+                                 transitions_only: bool = True):
     """
     Build train/val anticipation datasets for all three obs ratios.
 
@@ -129,9 +130,11 @@ def build_anticipation_datasets(X: np.ndarray,
     result = {}
     for ratio in [0.25, 0.50, 0.75]:
         train_ds = AnticipationDataset(X_train, y_train,
-                                        obs_ratio=ratio, seq_len=seq_len)
+                                        obs_ratio=ratio, seq_len=seq_len,
+                                        transitions_only=transitions_only)
         val_ds   = AnticipationDataset(X_val,   y_val,
-                                        obs_ratio=ratio, seq_len=seq_len)
+                                        obs_ratio=ratio, seq_len=seq_len,
+                                        transitions_only=transitions_only)
         result[ratio] = (train_ds, val_ds)
 
     return result

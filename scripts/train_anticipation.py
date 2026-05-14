@@ -62,9 +62,12 @@ def main():
     print(f"Backbone loaded from {args.checkpoint}")
 
     # Build anticipation datasets for all three observation ratios
-    print("\nBuilding anticipation datasets...")
+    # transitions_only=True: only train on windows where next label differs
+    # This is the meaningful anticipation task (predicting activity CHANGES)
+    print("\nBuilding anticipation datasets (transitions only)...")
     ant_datasets = build_anticipation_datasets(
-        X, y, test_ratio=0.2, seq_len=args.seq_len)
+        X, y, test_ratio=0.2, seq_len=args.seq_len,
+        transitions_only=True)
 
     for ratio, (tr, va) in ant_datasets.items():
         print(f"  p={ratio:.2f}: train={len(tr)}, val={len(va)}")
