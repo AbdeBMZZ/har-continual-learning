@@ -1,11 +1,21 @@
 % =============================================================
-%  System Description — Adaptive and Continual Learning for HAR
-%  Ready to \input{} into your main thesis document
+%  System Description --- Adaptive and Continual Learning for HAR
+%  \input{} this file from your main thesis document.
+%
+%  Required packages in main .tex preamble:
+%    \usepackage{amsmath}      % align, underbrace, operatorname, text
+%    \usepackage{amssymb}      % mathbb, mathcal, boldsymbol
+%    \usepackage{bm}           % bm (bold math, alternative to boldsymbol)
+%    \usepackage{booktabs}     % toprule, midrule, bottomrule
+%    \usepackage{graphicx}     % includegraphics
+%    \usepackage[utf8]{inputenc} % only for pdflatex
 % =============================================================
 
 \chapter{Proposed System}
 
+% ---------------------------------------------------------------
 \section{Problem Formulation}
+% ---------------------------------------------------------------
 
 Let $\mathcal{D} = \{(\mathbf{x}_i, y_i, s_i)\}_{i=1}^{N}$ be a dataset of
 inertial signals, where $\mathbf{x}_i \in \mathbb{R}^{T \times C}$ is a
@@ -18,16 +28,16 @@ We address two complementary objectives:
 \begin{enumerate}
     \item \textbf{Continual Activity Recognition.}
     Given a sequence of tasks $\{\mathcal{T}_1, \mathcal{T}_2, \ldots,
-    \mathcal{T}_K\}$ arriving over time — each representing a new user,
-    a new activity class, or a new context — train a model $f_\theta$ that
+    \mathcal{T}_K\}$ arriving over time---each representing a new user,
+    a new activity class, or a new context---train a model $f_\theta$ that
     performs well on \emph{all} tasks seen so far without retraining from
     scratch and without forgetting previously acquired knowledge
     (\emph{catastrophic forgetting}).
 
     \item \textbf{Activity Anticipation.}
     Given a partial observation $\mathbf{x}^{(p)} \in \mathbb{R}^{pT \times C}$
-    ($p \in (0,1)$) of an ongoing activity, predict the label $\hat{y}^{+1}$
-    of the \emph{next} activity before it begins.
+    ($p \in (0,1)$) of an ongoing activity, predict the label
+    $\hat{y}^{(+1)}$ of the \emph{next} activity before it begins.
 \end{enumerate}
 
 
@@ -53,10 +63,10 @@ Fourier-based resampling. The number of output samples is:
 
 \paragraph{Unit Conversion.}
 Accelerometer channels expressed in gravitational units ($g$) are converted
-to SI units:
+to SI units (m/s$^2$):
 \begin{equation}
-    \mathbf{a}_{[\text{m/s}^2]} = \mathbf{a}_{[g]} \times g_0,
-    \qquad g_0 = 9.80665\;\text{m/s}^2
+    \mathbf{a}_{[\mathrm{m/s}^{2}]} = \mathbf{a}_{[g]} \times g_0,
+    \qquad g_0 = 9.80665\ \mathrm{m/s}^{2}
     \label{eq:unit}
 \end{equation}
 
@@ -64,17 +74,17 @@ to SI units:
 Gravity is estimated via a 5\textsuperscript{th}-order Butterworth low-pass
 filter with cutoff $f_c = 0.5$\,Hz and removed by subtraction:
 \begin{equation}
-    \tilde{\mathbf{a}}(t) = \mathbf{a}(t) - \mathcal{F}_{\text{LP}}(\mathbf{a})(t)
+    \tilde{\mathbf{a}}(t) = \mathbf{a}(t) - \mathcal{F}_{\mathrm{LP}}\bigl(\mathbf{a}\bigr)(t)
     \label{eq:gravity}
 \end{equation}
-where $\mathcal{F}_{\text{LP}}$ denotes the low-pass filter operator.
+where $\mathcal{F}_{\mathrm{LP}}$ denotes the low-pass filter operator.
 This step is applied uniformly regardless of whether gravity is declared
-present in the dataset metadata, following \cite{amrani2025leveraging}.
+present in the dataset metadata \cite{amrani2025leveraging}.
 
 \subsection{Label Homogenisation}
 
 Each dataset uses its own activity vocabulary. We define a unified label
-space $\mathcal{Y}_u$ of 12 activity classes (Table~\ref{tab:labels}) and
+space $\mathcal{Y}_{u}$ of 12 activity classes (Table~\ref{tab:labels}) and
 map each dataset-specific label to the closest semantic equivalent using a
 combination of syntactic string similarity (Levenshtein distance) and
 signal-level similarity (Euclidean distance between hand-crafted feature
@@ -82,39 +92,39 @@ vectors).
 
 \begin{table}[h]
 \centering
-\caption{Unified activity label space $\mathcal{Y}_u$.}
+\caption{Unified activity label space $\mathcal{Y}_{u}$.}
 \label{tab:labels}
 \begin{tabular}{clll}
-\hline
+\toprule
 \textbf{ID} & \textbf{Activity} & \textbf{Datasets} & \textbf{Windows} \\
-\hline
-1  & Walking              & HAPT, WISDM, PAMAP2 & 17\,349 \\
-2  & Walking Upstairs     & HAPT, PAMAP2        &  6\,374 \\
-3  & Walking Downstairs   & HAPT, PAMAP2        &  5\,477 \\
-4  & Sitting / Standing   & HAPT, WISDM, PAMAP2 &  9\,593 \\
-5  & Jogging / Running    & WISDM, PAMAP2       & 12\,048 \\
-6  & Lying                & HAPT, PAMAP2        &  3\,112 \\
-7  & Cycling              & PAMAP2              &  1\,095 \\
-8  & Nordic Walking       & PAMAP2              &  1\,255 \\
-9  & Stand $\to$ Sit      & HAPT               &    138 \\
-10 & Sit $\to$ Stand      & HAPT               &    109 \\
-11 & Sit $\to$ Lie        & HAPT               &    163 \\
-12 & Lie $\to$ Sit        & HAPT               &    148 \\
-\hline
+\midrule
+1  & Walking                     & HAPT, WISDM, PAMAP2 & 17{,}349 \\
+2  & Walking Upstairs            & HAPT, PAMAP2        &  6{,}374 \\
+3  & Walking Downstairs          & HAPT, PAMAP2        &  5{,}477 \\
+4  & Sitting / Standing          & HAPT, WISDM, PAMAP2 &  9{,}593 \\
+5  & Jogging / Running           & WISDM, PAMAP2       & 12{,}048 \\
+6  & Lying                       & HAPT, PAMAP2        &  3{,}112 \\
+7  & Cycling                     & PAMAP2              &  1{,}095 \\
+8  & Nordic Walking              & PAMAP2              &  1{,}255 \\
+9  & Stand $\rightarrow$ Sit     & HAPT                &    138   \\
+10 & Sit $\rightarrow$ Stand     & HAPT                &    109   \\
+11 & Sit $\rightarrow$ Lie       & HAPT                &    163   \\
+12 & Lie $\rightarrow$ Sit       & HAPT                &    148   \\
+\bottomrule
 \end{tabular}
 \end{table}
 
 \subsection{Sliding Window Segmentation}
 
 Each preprocessed signal is divided into overlapping windows of fixed length
-$T = f_s \times W_{\text{sec}} = 50 \times 3 = 150$ samples with a stride
-of $S = T \times (1 - r_{\text{overlap}}) = 75$ samples
-($r_{\text{overlap}} = 0.5$).
-The label of each window is determined by majority vote over its sample-level
-labels:
+$T = f_s \times W_{\mathrm{sec}} = 50 \times 3 = 150$ samples with a stride
+of $S = T \times (1 - r_{\mathrm{ov}}) = 75$ samples
+($r_{\mathrm{ov}} = 0.5$).
+The label of each window is determined by majority vote over its
+sample-level labels:
 \begin{equation}
-    y_w = \arg\max_{c \in \mathcal{Y}_u}
-          \sum_{t=t_0}^{t_0+T-1} \mathbf{1}[y(t) = c]
+    y_w = \operatorname*{arg\,max}_{c \,\in\, \mathcal{Y}_{u}}
+          \sum_{t=t_0}^{t_0+T-1} \mathbf{1}\bigl[y(t) = c\bigr]
     \label{eq:window_label}
 \end{equation}
 This yields $N = 56{,}861$ labelled windows across 44 subjects from three
@@ -130,10 +140,15 @@ task-specific heads, as illustrated in Figure~\ref{fig:architecture}.
 
 \begin{figure}[h]
 \centering
-% Replace with actual figure when available
-\fbox{\parbox{0.85\linewidth}{\centering\vspace{1.5cm}
-\texttt{[Architecture diagram: IMU → Backbone → Module 1 / Module 2]}
-\vspace{1.5cm}}}
+\fbox{%
+  \parbox{0.85\linewidth}{%
+    \centering
+    \vspace{1.5cm}
+    \texttt{[Architecture diagram: IMU $\rightarrow$ Backbone $\rightarrow$
+    Module 1 / Module 2]}
+    \vspace{1.5cm}%
+  }%
+}
 \caption{Overview of the proposed two-headed continual HAR architecture.}
 \label{fig:architecture}
 \end{figure}
@@ -149,136 +164,139 @@ vector $\mathbf{e} \in \mathbb{R}^{d}$.
 A linear layer followed by Layer Normalisation projects the raw $C$-channel
 input to the model dimension $d$:
 \begin{equation}
-    \mathbf{H}^{(0)} = \text{LayerNorm}(\mathbf{x}\,\mathbf{W}_{\text{in}} + \mathbf{b}_{\text{in}}),
-    \quad \mathbf{W}_{\text{in}} \in \mathbb{R}^{C \times d}
+    \mathbf{H}^{(0)} = \mathrm{LayerNorm}\!\left(
+        \mathbf{x}\,\mathbf{W}_{\mathrm{in}} + \mathbf{b}_{\mathrm{in}}
+    \right), \quad
+    \mathbf{W}_{\mathrm{in}} \in \mathbb{R}^{C \times d}
 \end{equation}
 
 \paragraph{CLS Token.}
-A learnable class token $\mathbf{v}_{\text{cls}} \in \mathbb{R}^d$ is
+A learnable class token $\mathbf{v}_{\mathrm{cls}} \in \mathbb{R}^{d}$ is
 prepended to the projected sequence:
 \begin{equation}
-    \tilde{\mathbf{H}}^{(0)} =
-    [\mathbf{v}_{\text{cls}}\;;\;\mathbf{H}^{(0)}]
-    \in \mathbb{R}^{(T+1) \times d}
+    \widetilde{\mathbf{H}}^{(0)} =
+    \bigl[\,\mathbf{v}_{\mathrm{cls}}\;;\;\mathbf{H}^{(0)}\bigr]
+    \;\in\; \mathbb{R}^{(T+1) \times d}
 \end{equation}
 
 \paragraph{Positional Encoding.}
 A combination of fixed sinusoidal and learnable positional encodings is
 added:
 \begin{equation}
-    \mathbf{H} = \tilde{\mathbf{H}}^{(0)} + \lambda \cdot \mathbf{P},
+    \mathbf{H} = \widetilde{\mathbf{H}}^{(0)} + \lambda \cdot \mathbf{P},
     \qquad
-    P_{t,2k}   = \sin\!\left(\frac{t}{10000^{2k/d}}\right),\quad
+    P_{t,2k}   = \sin\!\left(\frac{t}{10000^{2k/d}}\right), \quad
     P_{t,2k+1} = \cos\!\left(\frac{t}{10000^{2k/d}}\right)
 \end{equation}
 where $\lambda \in \mathbb{R}$ is a learnable scaling parameter initialised
-to 1.
+to~1.
 
 \paragraph{Transformer Encoder Blocks.}
 The sequence is processed by $L = 4$ identical encoder blocks.
 Each block applies pre-normalisation multi-head self-attention followed
-by a position-wise feed-forward network:
+by a position-wise feed-forward network (pre-norm residual):
 \begin{align}
-    \mathbf{Z}^{(\ell)}   &= \mathbf{H}^{(\ell-1)}
-        + \text{MHA}\!\left(\text{LN}(\mathbf{H}^{(\ell-1)})\right) \\
-    \mathbf{H}^{(\ell)}   &= \mathbf{Z}^{(\ell)}
-        + \text{FFN}\!\left(\text{LN}(\mathbf{Z}^{(\ell)})\right)
+    \mathbf{Z}^{(\ell)} &= \mathbf{H}^{(\ell-1)}
+        + \mathrm{MHA}\!\left(\mathrm{LN}\!\left(\mathbf{H}^{(\ell-1)}\right)\right)
+    \label{eq:attn_res} \\
+    \mathbf{H}^{(\ell)} &= \mathbf{Z}^{(\ell)}
+        + \mathrm{FFN}\!\left(\mathrm{LN}\!\left(\mathbf{Z}^{(\ell)}\right)\right)
+    \label{eq:ffn_res}
 \end{align}
 Multi-head attention with $H = 4$ heads computes:
 \begin{equation}
-    \text{MHA}(\mathbf{Q},\mathbf{K},\mathbf{V}) =
-    \text{Concat}(\text{head}_1, \ldots, \text{head}_H)\,\mathbf{W}^O,
-    \qquad
-    \text{head}_h = \text{softmax}\!\left(
-        \frac{\mathbf{Q}\mathbf{W}^Q_h\,(\mathbf{K}\mathbf{W}^K_h)^\top}
+    \mathrm{MHA}(\mathbf{Q},\mathbf{K},\mathbf{V}) =
+    \mathrm{Concat}(\mathrm{head}_1, \ldots, \mathrm{head}_H)\,\mathbf{W}^{O},
+    \quad
+    \mathrm{head}_h = \mathrm{softmax}\!\left(
+        \frac{\mathbf{Q}\mathbf{W}^{Q}_h\,
+              \bigl(\mathbf{K}\mathbf{W}^{K}_h\bigr)^{\!\top}}
              {\sqrt{d/H}}
-    \right)\mathbf{V}\mathbf{W}^V_h
+    \right)\mathbf{V}\mathbf{W}^{V}_h
 \end{equation}
-The feed-forward sub-layer consists of two linear transformations with
-a GELU activation and dimension $d_{\text{ff}} = 2d = 256$:
+The feed-forward sub-layer uses GELU activation and inner dimension
+$d_{\mathrm{ff}} = 2d = 256$:
 \begin{equation}
-    \text{FFN}(\mathbf{z}) =
-    \text{GELU}(\mathbf{z}\,\mathbf{W}_1 + \mathbf{b}_1)\,\mathbf{W}_2
-    + \mathbf{b}_2
+    \mathrm{FFN}(\mathbf{z}) =
+    \mathrm{GELU}\!\left(\mathbf{z}\,\mathbf{W}_1 + \mathbf{b}_1\right)
+    \mathbf{W}_2 + \mathbf{b}_2
 \end{equation}
 
 \paragraph{Output.}
 The final embedding is the CLS token of the last block after Layer
 Normalisation:
 \begin{equation}
-    \mathbf{e} = \text{LN}(\mathbf{H}^{(L)})[0] \in \mathbb{R}^d
+    \mathbf{e} = \mathrm{LN}\!\left(\mathbf{H}^{(L)}\right)_{[0]}
+               \;\in\; \mathbb{R}^{d}
     \label{eq:embedding}
 \end{equation}
-The backbone has $531{,}457$ trainable parameters.
+The backbone contains $531{,}457$ trainable parameters with $d = 128$.
 
 
 % ---------------------------------------------------------------
-\subsection{Module 1 — Continual HAR Head}
+\subsection{Module 1 --- Continual HAR Head}
 % ---------------------------------------------------------------
 
 \subsubsection{Prototype Memory}
 
 We adopt a \emph{prototype-based} nearest-mean classifier inspired by
 LAPNet-HAR \cite{adaimi2022lifelong}. Each activity class $c \in \mathcal{Y}$
-is represented by a single prototype vector $\boldsymbol{\mu}_c \in
-\mathbb{R}^d$, defined as the running mean of all embeddings observed for
-that class:
+is represented by a prototype vector $\boldsymbol{\mu}_c \in \mathbb{R}^{d}$,
+defined as the running mean of all embeddings observed for that class:
 \begin{equation}
     \boldsymbol{\mu}_c^{(n+m)} =
-    \frac{n\,\boldsymbol{\mu}_c^{(n)} + m\,\bar{\mathbf{e}}_c^{\text{new}}}
+    \frac{n\,\boldsymbol{\mu}_c^{(n)} + m\,\bar{\mathbf{e}}_c^{\mathrm{new}}}
          {n + m}
     \label{eq:proto_update}
 \end{equation}
-where $n$ and $m$ are the previous and new sample counts for class $c$,
-and $\bar{\mathbf{e}}_c^{\text{new}}$ is the mean embedding of the new batch.
-This update is performed online without storing any past embeddings,
-making it memory-efficient.
+where $n$ is the previous count, $m$ the new batch count, and
+$\bar{\mathbf{e}}_c^{\mathrm{new}}$ the mean embedding of the incoming batch.
+This update is performed online without storing past embeddings.
 
 \paragraph{Nearest-Mean Classification.}
 At inference, a window $\mathbf{x}$ is classified by finding the closest
 prototype in Euclidean space:
 \begin{equation}
-    \hat{y} = \arg\min_{c \in \mathcal{K}}
-    \left\|\mathbf{e} - \boldsymbol{\mu}_c\right\|_2^2
+    \hat{y} = \operatorname*{arg\,min}_{c \,\in\, \mathcal{K}}
+    \left\|\mathbf{e} - \boldsymbol{\mu}_c\right\|_{2}^{2}
     \label{eq:nmc}
 \end{equation}
 where $\mathcal{K}$ is the set of all classes seen so far. This
-\emph{fixed-capacity} head naturally accommodates new classes without
-modifying the network architecture.
+\emph{fixed-capacity} head accommodates new classes without modifying the
+network architecture.
 
 \subsubsection{Experience Replay Buffer}
 
-To mitigate catastrophic forgetting, we maintain a fixed-size replay
-buffer $\mathcal{M}$ of capacity $|\mathcal{M}| = 2{,}000$ windows using
-class-balanced reservoir sampling. The buffer is partitioned evenly across
-all known classes: each class retains at most
-$\lfloor|\mathcal{M}|/|\mathcal{K}|\rfloor$ samples.
-
-When a new sample $(\mathbf{x}, y)$ arrives for class $c$, reservoir
-sampling decides whether it replaces an existing entry:
+To mitigate catastrophic forgetting, we maintain a replay buffer
+$\mathcal{M}$ of capacity $|\mathcal{M}| = 2{,}000$ windows using
+class-balanced reservoir sampling. Each class retains at most
+$\lfloor |\mathcal{M}| / |\mathcal{K}| \rfloor$ samples. When a new sample
+$(\mathbf{x}, y)$ arrives for class $c$, it replaces an existing buffer
+entry with probability:
 \begin{equation}
-    \text{replace with probability } \frac{|\mathcal{M}|/|\mathcal{K}|}{n_c + 1}
+    p_{\mathrm{replace}} =
+    \frac{|\mathcal{M}|\,/\,|\mathcal{K}|}{n_c + 1}
+    \label{eq:reservoir}
 \end{equation}
-where $n_c$ is the total number of samples seen for class $c$ so far.
-
-During continual training, a replay batch $\mathcal{B}_r \sim \mathcal{M}$
-is mixed with the current task batch $\mathcal{B}_t$, exposing the model
-to past distributions at every update step.
+where $n_c$ is the total number of samples seen for class $c$. During
+continual training, a replay batch $\mathcal{B}_r \sim \mathcal{M}$ is
+mixed with the current task batch $\mathcal{B}_t$ at every update step.
 
 \subsubsection{Supervised Contrastive Loss}
 
 To enforce inter-class separation in the embedding space as new classes
-arrive, we employ the supervised contrastive loss of
-\cite{khosla2020supervised}. Given a batch of $B$ normalised embeddings
-$\hat{\mathbf{e}}_i = \mathbf{e}_i / \|\mathbf{e}_i\|_2$:
+arrive, we apply the supervised contrastive loss of
+\cite{khosla2020supervised}. Given a batch of $B$ $\ell_2$-normalised
+embeddings $\hat{\mathbf{e}}_i = \mathbf{e}_i / \|\mathbf{e}_i\|_2$:
 \begin{equation}
-    \mathcal{L}_{\text{contrast}} =
+    \mathcal{L}_{\mathrm{contrast}} =
     -\frac{1}{B} \sum_{i=1}^{B}
     \frac{1}{|\mathcal{P}(i)|}
     \sum_{j \in \mathcal{P}(i)}
     \log
-    \frac{\exp\!\left(\hat{\mathbf{e}}_i^\top \hat{\mathbf{e}}_j / \tau\right)}
-    {\displaystyle\sum_{k \neq i} \exp\!\left(\hat{\mathbf{e}}_i^\top \hat{\mathbf{e}}_k / \tau\right)}
+    \frac{\exp\!\left({\hat{\mathbf{e}}_i^{\top} \hat{\mathbf{e}}_j}/{\tau}\right)}
+    {\displaystyle\sum_{k \neq i}
+        \exp\!\left({\hat{\mathbf{e}}_i^{\top} \hat{\mathbf{e}}_k}/{\tau}\right)}
     \label{eq:contrastive}
 \end{equation}
 where $\mathcal{P}(i) = \{j \neq i : y_j = y_i\}$ is the set of positive
@@ -288,65 +306,60 @@ pairs for anchor $i$ and $\tau = 0.07$ is the temperature.
 
 The total loss at each continual update step combines three terms:
 \begin{equation}
-    \mathcal{L}_{\text{total}} =
-    \underbrace{\mathcal{L}_{\text{CE}}(\mathcal{B}_t)}_{\text{current task}}
-    +\; \underbrace{\mathcal{L}_{\text{CE}}(\mathcal{B}_r)}_{\text{replay}}
-    +\; \lambda_c\;\underbrace{\mathcal{L}_{\text{contrast}}(\mathcal{B}_t)}_{\text{inter-class separation}}
+    \mathcal{L}_{\mathrm{total}} =
+    \underbrace{\mathcal{L}_{\mathrm{CE}}(\mathcal{B}_t)}_{\text{current task}}
+    +\;
+    \underbrace{\mathcal{L}_{\mathrm{CE}}(\mathcal{B}_r)}_{\text{replay}}
+    +\;
+    \lambda_c\,
+    \underbrace{\mathcal{L}_{\mathrm{contrast}}(\mathcal{B}_t)}_{\text{separation}}
     \label{eq:total_loss}
 \end{equation}
-where $\mathcal{L}_{\text{CE}}$ is the cross-entropy loss on the linear
-classification head and $\lambda_c = 0.1$ controls the contrastive
-regularisation strength.
+where $\mathcal{L}_{\mathrm{CE}}$ is cross-entropy and
+$\lambda_c = 0.1$ controls contrastive regularisation strength.
 
-After each task, prototype vectors are \emph{re-adapted} using the replay
-buffer to account for the backbone's updated embedding space:
+After each task, prototype vectors are \emph{re-adapted} to correct for
+the shift in the embedding space caused by backbone weight updates:
 \begin{equation}
-    \boldsymbol{\mu}_c \leftarrow
+    \boldsymbol{\mu}_c \;\leftarrow\;
     \frac{1}{|\mathcal{M}_c|}
-    \sum_{\mathbf{x} \in \mathcal{M}_c} f_\theta(\mathbf{x})
-    \quad \forall c \in \mathcal{K}
+    \sum_{\mathbf{x} \in \mathcal{M}_c} f_\theta(\mathbf{x}),
+    \quad \forall\, c \in \mathcal{K}
     \label{eq:proto_adapt}
 \end{equation}
-This prevents \emph{prototype obsolescence} — the misalignment between
-stored prototypes and the current embedding space after weight updates
-\cite{adaimi2022lifelong}.
+This prevents \emph{prototype obsolescence} \cite{adaimi2022lifelong}.
 
 
 % ---------------------------------------------------------------
-\subsection{Module 2 — Activity Anticipation Head}
+\subsection{Module 2 --- Activity Anticipation Head}
 % ---------------------------------------------------------------
 
 The anticipation head predicts the label of the \emph{next} activity from
 a partial observation of the current one. Given a sequence of $S$ partial
 windows $(\mathbf{x}^{(1)}, \ldots, \mathbf{x}^{(S)})$, each of length
-$pT$ ($p < 1$), the backbone produces a sequence of embeddings:
+$pT$ ($0 < p < 1$), the backbone produces a sequence of embeddings:
 \begin{equation}
-    \mathbf{e}^{(k)} = f_\theta(\mathbf{x}^{(k)}) \in \mathbb{R}^d,
-    \quad k = 1, \ldots, S
+    \mathbf{e}^{(k)} = f_\theta\!\left(\mathbf{x}^{(k)}\right)
+    \in \mathbb{R}^{d}, \quad k = 1, \ldots, S
 \end{equation}
-
-These are fed into a 2-layer LSTM with hidden dimension $d_h = 128$ that
-models the temporal progression of the activity stream:
+These are processed by a 2-layer LSTM with hidden dimension $d_h = 128$:
 \begin{equation}
-    \mathbf{h}^{(k)}, \mathbf{c}^{(k)} =
-    \text{LSTM}\!\left(\mathbf{e}^{(k)}, \mathbf{h}^{(k-1)},
-    \mathbf{c}^{(k-1)}\right)
+    \mathbf{h}^{(k)},\, \mathbf{c}^{(k)} =
+    \mathrm{LSTM}\!\left(\mathbf{e}^{(k)},\,
+                         \mathbf{h}^{(k-1)},\,
+                         \mathbf{c}^{(k-1)}\right)
 \end{equation}
-
-The final hidden state is passed through a linear classifier to produce
-next-activity logits:
+The final hidden state produces next-activity logits:
 \begin{equation}
-    \hat{\mathbf{y}}^{+1} =
-    \text{softmax}\!\left(
-        \text{LN}(\mathbf{h}^{(S)})\,\mathbf{W}_{\text{out}}
+    \hat{\mathbf{y}}^{(+1)} =
+    \mathrm{softmax}\!\left(
+        \mathrm{LN}\!\left(\mathbf{h}^{(S)}\right)\mathbf{W}_{\mathrm{out}}
     \right) \in \mathbb{R}^{|\mathcal{Y}|}
     \label{eq:anticipation}
 \end{equation}
-
-The model is trained to anticipate at three observation ratios
-$p \in \{0.25, 0.50, 0.75\}$, encouraging robustness to partial inputs
-of varying completeness. The training loss is cross-entropy between
-$\hat{\mathbf{y}}^{+1}$ and the true next-window label.
+The head is trained at three observation ratios $p \in \{0.25,\,0.50,\,0.75\}$
+with cross-entropy loss, encouraging robustness to inputs of varying
+completeness.
 
 
 % ---------------------------------------------------------------
@@ -355,43 +368,38 @@ $\hat{\mathbf{y}}^{+1}$ and the true next-window label.
 
 Training proceeds in two stages.
 
-\subsection{Stage 1 — Supervised Pre-training}
+\subsection{Stage 1 --- Supervised Pre-training}
 
 The backbone and a linear softmax head are trained jointly on the full
-merged dataset using standard cross-entropy loss, with the AdamW
-optimiser \cite{loshchilov2019adamw} ($\beta_1{=}0.9$, $\beta_2{=}0.999$,
-weight decay $= 10^{-4}$) and a cosine annealing learning rate schedule:
+merged dataset using cross-entropy loss, AdamW
+\cite{loshchilov2019adamw} ($\beta_1 = 0.9$, $\beta_2 = 0.999$,
+weight decay $= 10^{-4}$), and cosine annealing:
 \begin{equation}
-    \eta_t = \eta_{\min} + \frac{1}{2}(\eta_0 - \eta_{\min})
+    \eta_t = \eta_{\min} + \frac{1}{2}\left(\eta_0 - \eta_{\min}\right)
     \left(1 + \cos\frac{\pi\,t}{T_{\max}}\right)
     \label{eq:cosine_lr}
 \end{equation}
 with $\eta_0 = 10^{-3}$, $\eta_{\min} = 10^{-5}$, $T_{\max} = 30$ epochs,
-batch size 128. Gradient norms are clipped at 1.0.
+batch size~128. Gradient norms are clipped at~1.0. After pre-training,
+prototype vectors are initialised from the training-set embeddings via
+Eq.~\eqref{eq:proto_update}.
 
-At the end of pre-training, prototype vectors are initialised from the
-training set embeddings using Eq.~\eqref{eq:proto_update}.
-
-\subsection{Stage 2 — Continual Learning}
+\subsection{Stage 2 --- Continual Learning}
 
 Tasks arrive sequentially. For each task $\mathcal{T}_i$, the model is
 updated for $E = 10$ epochs using the composite loss in
-Eq.~\eqref{eq:total_loss} with a reduced learning rate $\eta = 5 \times
-10^{-5}$ to prevent catastrophic overwriting of the shared backbone.
-After training on task $\mathcal{T}_i$, prototypes are re-adapted via
-Eq.~\eqref{eq:proto_adapt} using the current replay buffer.
-
-Two continual learning scenarios are evaluated:
+Eq.~\eqref{eq:total_loss} with a reduced learning rate
+$\eta = 5 \times 10^{-5}$. After each task, prototypes are re-adapted via
+Eq.~\eqref{eq:proto_adapt}. Two scenarios are evaluated:
 
 \begin{itemize}
     \item \textbf{User-incremental:} each task $\mathcal{T}_i$ introduces
-    data from a new subject $s_i$. The model must adapt to the new
-    individual's movement style while retaining performance on all previous
-    subjects.
+    one new subject $s_i$. The model adapts to individual movement styles
+    while retaining performance across all prior subjects.
 
     \item \textbf{Class-incremental:} each task $\mathcal{T}_i$ introduces
-    two new activity classes. The model must extend its classification
-    vocabulary without retraining from scratch.
+    two new activity classes. The model extends its vocabulary without
+    retraining from scratch.
 \end{itemize}
 
 
@@ -400,28 +408,28 @@ Two continual learning scenarios are evaluated:
 % ---------------------------------------------------------------
 
 Let $R_{i,j}$ denote the macro-F1 score on the test set of task
-$\mathcal{T}_j$ evaluated \emph{after} training on task $\mathcal{T}_i$
-(with $i \geq j$). The results matrix $\mathbf{R} \in \mathbb{R}^{K \times K}$
-captures the full performance profile across all tasks and training stages.
+$\mathcal{T}_j$ after training on task $\mathcal{T}_i$ ($i \geq j$). The
+matrix $\mathbf{R} \in \mathbb{R}^{K \times K}$ captures the complete
+performance profile across all tasks and training stages.
 
 \paragraph{Macro F1 Score.}
-The primary per-task metric, which accounts for class imbalance:
+Primary recognition metric, robust to class imbalance:
 \begin{equation}
-    F1_{\text{macro}} = \frac{1}{|\mathcal{Y}|}\sum_{c \in \mathcal{Y}}
-    \frac{2\,\text{TP}_c}{2\,\text{TP}_c + \text{FP}_c + \text{FN}_c}
+    F1_{\mathrm{macro}} = \frac{1}{|\mathcal{Y}|}\sum_{c \in \mathcal{Y}}
+    \frac{2\,\mathrm{TP}_c}{2\,\mathrm{TP}_c + \mathrm{FP}_c + \mathrm{FN}_c}
 \end{equation}
 
 \paragraph{Backward Transfer (BWT).}
-Measures whether learning new tasks degrades performance on old ones
-\cite{lopez2017gradient}. A negative value indicates forgetting:
+Measures degradation of old tasks after new ones are learned
+\cite{lopez2017gradient}. Negative values indicate forgetting:
 \begin{equation}
-    \text{BWT} = \frac{1}{K-1}\sum_{j=1}^{K-1}
-    \left(R_{K,j} - R_{j,j}\right)
+    \mathrm{BWT} = \frac{1}{K-1}\sum_{j=1}^{K-1}
+    \bigl(R_{K,j} - R_{j,j}\bigr)
     \label{eq:bwt}
 \end{equation}
 
 \paragraph{Forgetting.}
-The average maximum performance drop per old task:
+Average maximum accuracy drop per old task:
 \begin{equation}
     \mathcal{F} = \frac{1}{K-1}\sum_{j=1}^{K-1}
     \left(\max_{i \leq K} R_{i,j} - R_{K,j}\right)
@@ -429,52 +437,80 @@ The average maximum performance drop per old task:
 \end{equation}
 
 \paragraph{Forward Transfer (FWT).}
-Measures whether knowledge from past tasks accelerates learning of new ones:
+Measures whether learning earlier tasks accelerates new ones:
 \begin{equation}
-    \text{FWT} = \frac{1}{K-1}\sum_{i=2}^{K}
-    \left(R_{i-1,i} - b_i\right)
+    \mathrm{FWT} = \frac{1}{K-1}\sum_{i=2}^{K}
+    \bigl(R_{i-1,i} - b_i\bigr)
     \label{eq:fwt}
 \end{equation}
 where $b_i$ is the random-chance baseline accuracy for task $\mathcal{T}_i$.
 
 \paragraph{Anticipation Accuracy.}
-For the anticipation head, accuracy is reported at each observation ratio
-$p \in \{0.25, 0.50, 0.75\}$ to characterise the trade-off between
-prediction lead time and accuracy.
+Reported at each observation ratio $p \in \{0.25,\,0.50,\,0.75\}$ to
+characterise the trade-off between prediction lead time and accuracy.
 
 
 % ---------------------------------------------------------------
-%  Bibliography entries (add to your main .bib file)
+%  .bib entries --- add to your bibliography file
 % ---------------------------------------------------------------
+%
 % @article{amrani2025leveraging,
-%   title={Leveraging dataset integration and continual learning for HAR},
-%   author={Amrani, Hamza and others},
-%   journal={Int. J. Mach. Learn. Cyber.},
-%   volume={16}, pages={5213--5234}, year={2025}
+%   author  = {Amrani, Hamza and Micucci, Daniela and Mobilio, Marco
+%              and Napoletano, Paolo},
+%   title   = {Leveraging dataset integration and continual learning
+%              for human activity recognition},
+%   journal = {International Journal of Machine Learning and Cybernetics},
+%   volume  = {16},
+%   pages   = {5213--5234},
+%   year    = {2025},
+%   doi     = {10.1007/s13042-025-02569-1}
 % }
+%
 % @article{adaimi2022lifelong,
-%   title={Lifelong Adaptive Machine Learning for Sensor-Based HAR
-%          Using Prototypical Networks},
-%   author={Adaimi, Rebecca and Thomaz, Edison},
-%   journal={Sensors}, volume={22}, number={18}, pages={6881}, year={2022}
+%   author  = {Adaimi, Rebecca and Thomaz, Edison},
+%   title   = {Lifelong Adaptive Machine Learning for Sensor-Based
+%              Human Activity Recognition Using Prototypical Networks},
+%   journal = {Sensors},
+%   volume  = {22},
+%   number  = {18},
+%   pages   = {6881},
+%   year    = {2022},
+%   doi     = {10.3390/s22186881}
 % }
+%
 % @inproceedings{khosla2020supervised,
-%   title={Supervised Contrastive Learning},
-%   author={Khosla, Prannay and others},
-%   booktitle={NeurIPS}, year={2020}
+%   author    = {Khosla, Prannay and others},
+%   title     = {Supervised Contrastive Learning},
+%   booktitle = {Advances in Neural Information Processing Systems},
+%   volume    = {33},
+%   pages     = {18661--18673},
+%   year      = {2020}
 % }
+%
 % @article{dirgova2022transformer,
-%   title={Wearable Sensor-Based HAR with Transformer Model},
-%   author={Dirgov{\'a} Lupt{\'a}kov{\'a}, Ivana and others},
-%   journal={Sensors}, volume={22}, number={5}, pages={1911}, year={2022}
+%   author  = {Dirgov{\'a} Lupt{\'a}kov{\'a}, Ivana and Kubov{\v{c}}{\'\i}k,
+%              Martin and Posp{\'\i}chal, Ji{\v{r}}{\'\i}},
+%   title   = {Wearable Sensor-Based Human Activity Recognition with
+%              Transformer Model},
+%   journal = {Sensors},
+%   volume  = {22},
+%   number  = {5},
+%   pages   = {1911},
+%   year    = {2022},
+%   doi     = {10.3390/s22051911}
 % }
+%
 % @inproceedings{lopez2017gradient,
-%   title={Gradient Episodic Memory for Continual Learning},
-%   author={Lopez-Paz, David and Ranzato, Marc'Aurelio},
-%   booktitle={NeurIPS}, year={2017}
+%   author    = {Lopez-Paz, David and Ranzato, Marc'Aurelio},
+%   title     = {Gradient Episodic Memory for Continual Learning},
+%   booktitle = {Advances in Neural Information Processing Systems},
+%   volume    = {30},
+%   year      = {2017}
 % }
+%
 % @inproceedings{loshchilov2019adamw,
-%   title={Decoupled Weight Decay Regularization},
-%   author={Loshchilov, Ilya and Hutter, Frank},
-%   booktitle={ICLR}, year={2019}
+%   author    = {Loshchilov, Ilya and Hutter, Frank},
+%   title     = {Decoupled Weight Decay Regularization},
+%   booktitle = {International Conference on Learning Representations},
+%   year      = {2019}
 % }
