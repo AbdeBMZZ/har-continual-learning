@@ -61,19 +61,28 @@ class HARDataset:
     # ------------------------------------------------------------------
 
     def train_test_split(self, test_ratio: float = 0.2, seed: int = 42):
-        """Random stratified split by subject (no subject appears in both sets)."""
+        """Split dataset into train/test.
+
+        If more than one subject exists: split by subject (no leakage).
+        If only one subject (e.g. single-user task): split by sample index.
+        """
         rng = np.random.default_rng(seed)
         unique_subjects = np.unique(self.subjects)
-        rng.shuffle(unique_subjects)
 
-        n_test = max(1, int(len(unique_subjects) * test_ratio))
-        test_subjects  = set(unique_subjects[:n_test])
-        train_subjects = set(unique_subjects[n_test:])
+        if len(unique_subjects) > 1:
+            rng.shuffle(unique_subjects)
+            n_test        = max(1, int(len(unique_subjects) * test_ratio))
+            test_subjects = set(unique_subjects[:n_test])
+            train_mask    = np.array([s not in test_subjects for s in self.subjects])
+        else:
+            # Single subject — split by sample index
+            idx       = np.arange(len(self.X))
+            rng.shuffle(idx)
+            n_test    = max(1, int(len(idx) * test_ratio))
+            test_idx  = set(idx[:n_test])
+            train_mask = np.array([i not in test_idx for i in range(len(self.X))])
 
-        train_mask = np.array([s in train_subjects for s in self.subjects])
-        test_mask  = ~train_mask
-
-        return self._subset(train_mask), self._subset(test_mask)
+        return self._subset(train_mask), self._subset(~train_mask)
 
     def get_task_by_user(self, subject_id: int) -> "HARDataset":
         """Return a dataset slice for a single subject."""

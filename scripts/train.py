@@ -89,8 +89,15 @@ def main():
 
     if args.checkpoint:
         print(f"Loading checkpoint: {args.checkpoint}")
-        ckpt = torch.load(args.checkpoint, map_location="cpu")
-        model.load_state_dict(ckpt["model_state"])
+        ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+        # Load backbone weights only (classifier head may differ in n_classes)
+        backbone_state = {
+            k.removeprefix("backbone."): v
+            for k, v in ckpt["model_state"].items()
+            if k.startswith("backbone.")
+        }
+        model.backbone.load_state_dict(backbone_state)
+        print("  Backbone weights loaded (classifier head re-initialized for new n_classes)")
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
