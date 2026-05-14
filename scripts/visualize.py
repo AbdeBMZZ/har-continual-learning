@@ -133,6 +133,70 @@ def plot_training_history(history: dict, save_path: Path):
     print(f"Saved: {save_path}")
 
 
+def plot_baseline_comparison(R_ours: np.ndarray,
+                              R_base: np.ndarray,
+                              save_path: Path,
+                              scenario: str = "user"):
+    """Line plot comparing our method vs no-replay baseline per task."""
+    n = min(R_ours.shape[0], R_base.shape[0])
+    fig, ax = plt.subplots(figsize=(9, 5))
+
+    # Final row = performance after all tasks
+    ours_final = [R_ours[n-1, j] for j in range(n) if not np.isnan(R_ours[n-1, j])]
+    base_final = [R_base[n-1, j] for j in range(n) if not np.isnan(R_base[n-1, j])]
+    xs_ours = [j for j in range(n) if not np.isnan(R_ours[n-1, j])]
+    xs_base = [j for j in range(n) if not np.isnan(R_base[n-1, j])]
+
+    ax.plot(xs_ours, ours_final, "o-", color="#2196F3",
+            label="Ours (replay + prototypes + contrastive)", linewidth=2)
+    ax.plot(xs_base, base_final, "s--", color="#F44336",
+            label="Baseline (naive fine-tuning, no replay)", linewidth=2, alpha=0.8)
+
+    ax.set_xlabel("Task index")
+    ax.set_ylabel("Macro F1 (after all tasks)")
+    ax.set_title(f"Our method vs baseline — {scenario}-incremental")
+    ax.set_ylim(0, 1.05)
+    ax.legend(loc="lower left")
+    ax.grid(alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150)
+    plt.close()
+    print(f"Saved: {save_path}")
+
+
+def plot_anticipation(results: dict, save_path: Path):
+    """Bar chart of anticipation accuracy at each observation ratio."""
+    ratios = sorted(results.keys())
+    f1s    = [results[r]["val_f1"]  for r in ratios]
+    accs   = [results[r]["val_acc"] for r in ratios]
+    labels = [f"{int(r*100)}%" for r in ratios]
+
+    x = np.arange(len(ratios))
+    fig, ax = plt.subplots(figsize=(6, 4))
+    bars1 = ax.bar(x - 0.2, f1s,  0.35, label="Macro F1",  color="#4CAF50")
+    bars2 = ax.bar(x + 0.2, accs, 0.35, label="Accuracy",  color="#2196F3")
+
+    for bar in list(bars1) + list(bars2):
+        ax.text(bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.01,
+                f"{bar.get_height():.3f}",
+                ha="center", va="bottom", fontsize=9)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"p={l}" for l in labels])
+    ax.set_ylabel("Score")
+    ax.set_title("Activity Anticipation — Performance vs Observation Ratio")
+    ax.set_ylim(0, 1.1)
+    ax.legend()
+    ax.grid(axis="y", alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150)
+    plt.close()
+    print(f"Saved: {save_path}")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--results_dir", default="checkpoints")
@@ -158,6 +222,21 @@ def main():
         plot_summary_bar(matrix, out_dir / f"summary_{args.scenario}.png")
     else:
         print(f"No results matrix found at {R_path}")
+
+    # --- Baseline comparison ---
+    base_path = results_dir / f"baseline_matrix_{args.scenario}.npy"
+    if base_path.exists() and R_path.exists():
+        R_base = np.load(base_path)
+        plot_baseline_comparison(
+            R, R_base,
+            out_dir / f"baseline_comparison_{args.scenario}.png",
+            scenario=args.scenario)
+
+    # --- Anticipation results ---
+    ant_path = results_dir / "anticipation_results.npy"
+    if ant_path.exists():
+        ant_results = np.load(ant_path, allow_pickle=True).item()
+        plot_anticipation(ant_results, out_dir / "anticipation_results.png")
 
     # --- Pre-training history ---
     hist_path = results_dir / "pretrain_history.npy"
