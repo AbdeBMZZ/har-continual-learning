@@ -198,9 +198,12 @@ def load_wisdm(root: str | Path) -> List[Sample]:
 
     raw_file = root / "WISDM_ar_v1.1_raw.txt"
     if not raw_file.exists():
-        raw_file = next(root.glob("*.txt"), None)
-        if raw_file is None:
-            return []
+        # Try one level deeper (e.g. wisdm/WISDM_ar_v1.1/WISDM_ar_v1.1_raw.txt)
+        raw_file = next(root.rglob("WISDM_ar_v1.1_raw.txt"), None)
+    if raw_file is None:
+        raw_file = next(root.rglob("*raw*.txt"), None)
+    if raw_file is None:
+        return []
 
     rows = []
     with open(raw_file) as fh:

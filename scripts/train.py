@@ -110,9 +110,10 @@ def main():
             device=device,
         )
 
-        # Save checkpoint
+        # Save checkpoint + history
         ckpt_path = out_dir / "pretrained.pt"
         model.save(str(ckpt_path))
+        np.save(str(out_dir / "pretrain_history.npy"), history)
         print(f"\nSaved to {ckpt_path}")
 
         # Final evaluation
