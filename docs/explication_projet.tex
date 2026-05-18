@@ -1,0 +1,905 @@
+\documentclass[12pt, a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{parskip}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{tcolorbox}
+\usepackage{enumitem}
+\usepackage{tikz}
+\usepackage{array}
+
+\geometry{margin=2.5cm, top=3cm, bottom=3cm}
+
+% Colors
+\definecolor{mainblue}{RGB}{0,80,160}
+\definecolor{lightblue}{RGB}{230,240,255}
+\definecolor{darkgreen}{RGB}{0,120,0}
+\definecolor{lightgreen}{RGB}{230,255,230}
+\definecolor{darkorange}{RGB}{200,80,0}
+\definecolor{lightorange}{RGB}{255,240,225}
+\definecolor{darkred}{RGB}{160,0,0}
+\definecolor{lightgray}{RGB}{245,245,245}
+
+% Section formatting
+\titleformat{\section}{\Large\bfseries\color{mainblue}}{}{0em}{}[\color{mainblue}\rule{\linewidth}{1pt}]
+\titleformat{\subsection}{\large\bfseries\color{mainblue!80}}{}{0em}{}
+
+% Header/Footer
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{\color{gray}\small Apprentissage Continu pour la HAR}
+\lhead{\color{gray}\small NEDJAM Walaa --- ESI 2025/2026}
+\cfoot{\thepage}
+
+% Box environments
+\tcbuselibrary{skins, breakable}
+
+\newtcolorbox{definitionbox}[1]{
+  colback=lightblue, colframe=mainblue, fonttitle=\bfseries,
+  title=#1, rounded corners, breakable
+}
+
+\newtcolorbox{resultbox}[1]{
+  colback=lightgreen, colframe=darkgreen, fonttitle=\bfseries,
+  title=#1, rounded corners, breakable
+}
+
+\newtcolorbox{problembox}[1]{
+  colback=lightorange, colframe=darkorange, fonttitle=\bfseries,
+  title=#1, rounded corners, breakable
+}
+
+\newtcolorbox{keybox}{
+  colback=lightgray, colframe=gray!60, rounded corners, breakable
+}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\begin{document}
+
+% Title page
+\begin{titlepage}
+  \centering
+  \vspace*{2cm}
+  {\Huge\bfseries\color{mainblue}
+    Apprentissage Adaptatif et Continu\\[0.4em]
+    pour la Reconnaissance\\[0.4em]
+    d'Activité Humaine
+  \par}
+  \vspace{1cm}
+  {\large\color{gray} Explication complète du projet --- de zéro à la présentation}
+  \vspace{2cm}
+
+  \begin{tcolorbox}[colback=lightblue, colframe=mainblue, width=0.85\textwidth]
+  \centering
+  \textbf{PFE --- École Nationale Supérieure d'Informatique (ESI)}\\
+  Année universitaire 2025/2026\\[0.5em]
+  Étudiante : NEDJAM Walaa\\
+  Encadrante : Attal Ferhat (LISSI, UPEC Paris)\\
+  Co-encadrante : MEZIANI Lila
+  \end{tcolorbox}
+
+  \vfill
+  {\large\today}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+% =============================================================
+\section{Le problème de départ}
+% =============================================================
+
+\subsection{C'est quoi la reconnaissance d'activité humaine (HAR) ?}
+
+Imagine que tu portes une montre connectée ou un téléphone dans ta poche.
+À l'intérieur se trouve un capteur appelé \textbf{IMU}
+(Inertial Measurement Unit) qui contient~:
+\begin{itemize}
+  \item un \textbf{accéléromètre} --- mesure l'accélération (mouvements linéaires)
+  \item un \textbf{gyroscope} --- mesure la rotation
+\end{itemize}
+
+Ce capteur enregistre tes mouvements \textbf{50 fois par seconde}
+(50~Hz), produisant un flux de données continues.
+
+\begin{definitionbox}{Objectif de la HAR}
+À partir de ce flux de données brutes, \textbf{deviner automatiquement
+ce que fait la personne} : marcher, courir, monter des escaliers,
+s'asseoir, tomber, faire du vélo\ldots
+\end{definitionbox}
+
+\medskip
+\begin{center}
+\begin{tabular}{ccc}
+\textbf{Capteur IMU} & $\longrightarrow$ & \textbf{Modèle IA} \\
+(données brutes) & & $\downarrow$ \\
+& & ``Tu marches'' \\
+\end{tabular}
+\end{center}
+
+\subsection{Pourquoi c'est utile ?}
+
+\begin{itemize}
+  \item \textbf{Santé} : détecter les chutes chez les personnes âgées
+        avant qu'elles ne se blessent
+  \item \textbf{Médecine} : suivre les patients à distance
+        (rééducation, Parkinson, Alzheimer)
+  \item \textbf{Sport} : compter les calories, analyser la technique
+  \item \textbf{Sécurité industrielle} : détecter les comportements
+        anormaux des travailleurs
+\end{itemize}
+
+\subsection{Le vrai problème : le modèle oublie}
+
+Un modèle classique est entraîné \textbf{une seule fois} sur des données
+fixes. Mais dans la réalité, le monde change~:
+
+\begin{itemize}
+  \item Un \textbf{nouvel utilisateur} arrive (ses mouvements sont différents)
+  \item Une \textbf{nouvelle activité} doit être reconnue (ex.~: vélo, yoga)
+  \item Le \textbf{contexte change} (capteur différent, hôpital vs.~stade)
+\end{itemize}
+
+\begin{problembox}{Le catastrophic forgetting (oubli catastrophique)}
+Si tu ré-entraînes le modèle sur le nouvel utilisateur,
+\textbf{il oublie complètement les anciens}.
+C'est le \emph{catastrophic forgetting} --- un problème fondamental
+de l'intelligence artificielle.
+
+\medskip
+\begin{center}
+\begin{tabular}{ll}
+\textbf{Avant} & Reconnaît bien Alice, Bob, Carol \\
+Ré-entraîne sur David & \\
+\textbf{Après} & Reconnaît bien David mais oublie Alice, Bob, Carol $\times$ \\
+\end{tabular}
+\end{center}
+\end{problembox}
+
+\textbf{C'est exactement ce problème que ce projet résout.}
+
+
+% =============================================================
+\section{Notre solution en 3 niveaux}
+% =============================================================
+
+Notre système apprend de manière \textbf{continue} ---
+il s'adapte à chaque nouvel utilisateur ou nouvelle activité
+\emph{sans oublier} ce qu'il a appris avant.
+
+Il est organisé en deux modules~:
+
+\begin{center}
+\begin{tabular}{|c|l|}
+\hline
+\textbf{Backbone} & Extracteur de caractéristiques partagé (Transformer) \\
+\hline
+\textbf{Module 1} & Reconnaissance continue (prototype memory + replay) \\
+\hline
+\textbf{Module 2} & Anticipation d'activité (prédire la prochaine activité) \\
+\hline
+\end{tabular}
+\end{center}
+
+\medskip
+Le signal IMU passe d'abord par le backbone qui le transforme en un
+\textbf{vecteur numérique} résumant l'activité en cours.
+Ce vecteur est ensuite utilisé par les deux modules.
+
+
+% =============================================================
+\section{Les données utilisées}
+% =============================================================
+
+\subsection{D'où viennent les données ?}
+
+Nous utilisons \textbf{3 bases de données publiques} de capteurs IMU~:
+
+\begin{table}[h]
+\centering
+\caption{Bases de données utilisées.}
+\begin{tabular}{llrrr}
+\toprule
+\textbf{Dataset} & \textbf{Activités} & \textbf{Sujets}
+  & \textbf{Fréquence} & \textbf{Fenêtres} \\
+\midrule
+HAPT   & Marche, escaliers, transitions & 30 & 50 Hz  & 10\,451 \\
+WISDM  & Marche, course, vélo           & 36 & 20 Hz  & 36\,554 \\
+PAMAP2 & 18 activités variées           &  9 & 100 Hz &  9\,856 \\
+\midrule
+\textbf{Total} & \textbf{12 classes unifiées} & \textbf{44}
+  & \textbf{50 Hz} & \textbf{56\,861} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Problème : les données sont hétérogènes}
+
+Chaque base de données a sa propre fréquence, ses propres unités
+et ses propres noms d'activités.
+Exemple : HAPT dit ``walking'' et WISDM dit ``Walk'' ---
+c'est la même chose mais le modèle ne le sait pas.
+
+\subsection{Notre pipeline de prétraitement (3 étapes)}
+
+\begin{enumerate}
+  \item \textbf{Rééchantillonnage} --- tout ramener à 50 Hz (même rythme)
+  \item \textbf{Suppression de la gravité} --- filtrer la composante
+        statique pour ne garder que le mouvement
+  \item \textbf{Fenêtrage glissant} --- découper le signal en fenêtres
+        de 3 secondes avec 50\% de chevauchement
+\end{enumerate}
+
+\begin{definitionbox}{Résultat du prétraitement}
+56\,861 fenêtres de 3 secondes, 6 canaux (acc x,y,z + gyro x,y,z),
+12 classes d'activité unifiées, 44 sujets différents.
+\end{definitionbox}
+
+Les 12 classes unifiées sont~:
+marcher, monter les escaliers, descendre les escaliers,
+assis/debout, courir, allongé, vélo, marche nordique,
+et 4 transitions posturales (s'asseoir, se lever, s'allonger, se redresser).
+
+
+% =============================================================
+\section{Le backbone : l'encodeur Transformer}
+% =============================================================
+
+\subsection{C'est quoi un Transformer ?}
+
+Le Transformer est une architecture d'intelligence artificielle inventée
+en 2017 (célèbre grâce à ChatGPT). À la base il travaille sur du texte,
+mais ici on l'adapte pour des \textbf{séries temporelles de capteurs IMU}.
+
+\begin{definitionbox}{Rôle du backbone}
+Prendre une fenêtre de 3 secondes de données IMU (150 points $\times$ 6 canaux)
+et la \textbf{résumer en un seul vecteur de 128 nombres}
+qui capture l'essentiel de l'activité.
+\end{definitionbox}
+
+\subsection{Comment fonctionne-t-il ?}
+
+\begin{enumerate}
+  \item \textbf{Projection} --- les 6 canaux sont transformés en 128 dimensions
+  \item \textbf{Token CLS} --- un token spécial est ajouté au début de la séquence
+        (comme un résumé vide qui va se remplir)
+  \item \textbf{Encodage positionnel} --- chaque position temporelle reçoit
+        une signature unique (le modèle sait ``ceci est le début / milieu / fin'')
+  \item \textbf{4 blocs Transformer} --- chaque bloc fait de l'``attention''~:
+        il regarde toute la séquence et décide quelles parties sont importantes
+  \item \textbf{Sortie} --- le token CLS contient maintenant le résumé
+        complet de la fenêtre : un vecteur de 128 nombres
+\end{enumerate}
+
+\begin{keybox}
+\textbf{Analogie} : imagine que tu lis une phrase.
+L'attention te permet de comprendre que dans
+``\emph{la balle que Marie a frappée est rouge}'',
+``rouge'' décrit ``balle'' et non ``Marie''.
+Le Transformer fait pareil avec les données IMU~:
+il comprend que le pic d'accélération au pas 23
+est lié au creux de rotation au pas 18.
+\end{keybox}
+
+\subsection{Paramètres du backbone}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Paramètre} & \textbf{Valeur} \\
+\midrule
+Dimension $d$          & 128 \\
+Nombre de blocs $L$    & 4 \\
+Têtes d'attention $H$  & 4 \\
+Dimension FFN          & 256 \\
+Paramètres totaux      & 531\,457 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+% =============================================================
+\section{Module 1 : Reconnaissance continue}
+% =============================================================
+
+\subsection{Le problème spécifique}
+
+Le backbone produit un vecteur de 128 nombres pour chaque fenêtre.
+Il faut maintenant \textbf{classer} ce vecteur dans l'une des 12 activités
+\emph{sans oublier les activités déjà apprises} quand une nouvelle arrive.
+
+\subsection{Solution 1 : La mémoire des prototypes}
+
+Au lieu d'un classifieur ordinaire (softmax), on utilise une approche
+par \textbf{prototypes}. Chaque activité est représentée par
+\textbf{un seul vecteur moyen} --- son prototype.
+
+\begin{definitionbox}{Prototype}
+Le prototype de ``marcher'' est la \textbf{moyenne} de tous les vecteurs
+produits par le backbone quand la personne marche.
+Il représente le ``centre de gravité'' de cette activité dans l'espace.
+\end{definitionbox}
+
+\textbf{Classification} : pour reconnaître une activité inconnue,
+on calcule la distance entre son vecteur et tous les prototypes.
+L'activité dont le prototype est le plus proche gagne.
+
+\textbf{Avantages}~:
+\begin{itemize}
+  \item Ajouter une nouvelle activité = juste ajouter un nouveau prototype
+        (pas besoin de tout ré-entraîner)
+  \item Mise à jour en ligne avec la formule de la moyenne courante~:
+        aucune donnée ancienne ne doit être stockée
+\end{itemize}
+
+\subsection{Solution 2 : Le tampon de rejeu (Experience Replay)}
+
+\begin{problembox}{Pourquoi le replay ?}
+Même avec les prototypes, le backbone lui-même peut se dégrader
+quand on continue l'entraînement sur de nouvelles données.
+Les anciens patterns sont progressivement ``écrasés''.
+\end{problembox}
+
+Le tampon de rejeu conserve un \textbf{petit échantillon} des données
+passées (2\,000 fenêtres maximum, réparties équitablement entre les classes).
+À chaque étape d'entraînement, un mini-lot de ces données anciennes
+est \textbf{mélangé} avec les nouvelles données pour rappeler au modèle
+ce qu'il a appris avant.
+
+\begin{keybox}
+\textbf{Analogie} : c'est comme réviser ses anciens cours en même temps
+qu'on apprend un nouveau chapitre.
+Sans révision, on oublie. Avec révision, on consolide.
+\end{keybox}
+
+\textbf{Réservoir sampling} : quand le tampon est plein et qu'une nouvelle
+donnée arrive, elle remplace aléatoirement une ancienne
+avec une probabilité calculée pour maintenir l'équilibre entre les classes.
+
+\subsection{Solution 3 : La perte contrastive supervisée}
+
+En plus de l'apprentissage classique, on ajoute une \textbf{perte contrastive}
+qui force le modèle à~:
+\begin{itemize}
+  \item \textbf{Rapprocher} les vecteurs de la même activité
+  \item \textbf{Éloigner} les vecteurs d'activités différentes
+\end{itemize}
+
+Cela rend les prototypes plus robustes et la classification plus précise,
+surtout quand de nouvelles classes arrivent et risquent de brouiller
+les frontières entre classes existantes.
+
+\subsection{La fonction de perte totale}
+
+À chaque étape d'entraînement continu, on minimise~:
+\[
+\mathcal{L}_{\text{total}} =
+\underbrace{\mathcal{L}_{\text{CE}}(\text{nouvelles données})}_{\text{apprendre}}
++\;
+\underbrace{\mathcal{L}_{\text{CE}}(\text{données du tampon})}_{\text{ne pas oublier}}
++\;
+0.1 \times
+\underbrace{\mathcal{L}_{\text{contrast}}}_{\text{séparer les classes}}
+\]
+
+
+% =============================================================
+\section{Module 2 : Anticipation d'activité}
+% =============================================================
+
+\subsection{Le problème}
+
+Peut-on \textbf{prédire la prochaine activité} avant qu'elle ne commence,
+en observant seulement une partie du signal actuel~?
+
+Exemple : si on voit les 50\% premiers d'une marche,
+peut-on deviner que la prochaine activité sera ``monter les escaliers''~?
+
+\subsection{Architecture}
+
+\begin{enumerate}
+  \item On prend les $S=5$ dernières fenêtres partielles
+        (chacune tronquée à $p$\% de sa durée)
+  \item Chaque fenêtre passe par le backbone $\rightarrow$ 5 vecteurs de 128
+  \item Ces 5 vecteurs sont traités par un \textbf{LSTM à 2 couches}
+        qui modélise la progression temporelle
+  \item La dernière sortie du LSTM prédit la prochaine activité
+\end{enumerate}
+
+\begin{keybox}
+\textbf{LSTM} (Long Short-Term Memory) : un réseau de neurones spécialisé
+dans les séquences. Il ``se souvient'' des états précédents pour
+mieux prédire le suivant --- idéal pour modéliser
+l'enchaînement des activités.
+\end{keybox}
+
+\subsection{Entraînement}
+
+Le backbone est \textbf{gelé} (non modifié) pendant l'entraînement
+de ce module. Seul le LSTM apprend.
+On entraîne à trois ratios d'observation~:
+$p \in \{25\%, 50\%, 75\%\}$.
+
+
+% =============================================================
+\section{L'entraînement en deux phases}
+% =============================================================
+
+\subsection{Phase 1 : Pré-entraînement supervisé}
+
+On entraîne le backbone sur \textbf{toutes les données fusionnées}
+(56\,861 fenêtres) avec une classification classique (softmax).
+\begin{itemize}
+  \item Optimiseur~: AdamW
+  \item Planification du taux d'apprentissage~: cosine annealing
+  \item 30 époques, batch de 128 fenêtres
+\end{itemize}
+
+À la fin, les prototypes sont initialisés depuis les données d'entraînement.
+
+\subsection{Phase 2 : Apprentissage continu}
+
+Les tâches arrivent une par une.
+Pour chaque tâche (nouvel utilisateur ou nouvelle classe)~:
+\begin{enumerate}
+  \item Entraîner 10 époques avec la perte totale (CE + replay + contrastif)
+  \item Mettre à jour les prototypes
+  \item Ajouter les nouvelles données au tampon de rejeu
+\end{enumerate}
+
+
+% =============================================================
+\section{Les métriques d'évaluation}
+% =============================================================
+
+On mesure les performances avec des métriques spécifiques
+à l'apprentissage continu~:
+
+\begin{table}[h]
+\centering
+\caption{Métriques d'évaluation.}
+\begin{tabular}{lll}
+\toprule
+\textbf{Métrique} & \textbf{Définition} & \textbf{Idéal} \\
+\midrule
+\textbf{Macro F1}
+  & Moyenne du F1 sur toutes les classes
+  & Proche de 1 \\
+\textbf{BWT}
+  & Dégradation des anciennes tâches après les nouvelles
+  & Proche de 0 \\
+\textbf{Forgetting}
+  & Chute maximale de performance par ancienne tâche
+  & Proche de 0 \\
+\textbf{FWT}
+  & Amélioration des nouvelles tâches grâce aux anciennes
+  & Proche de 1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{definitionbox}{La matrice des résultats}
+$R[i,j]$ = macro-F1 sur la tâche $j$ après avoir appris la tâche $i$.
+La diagonale montre ce qu'on apprend immédiatement.
+Lire une colonne de haut en bas montre comment cette tâche est oubliée.
+\end{definitionbox}
+
+
+% =============================================================
+\section{Résultats expérimentaux}
+% =============================================================
+
+\subsection{Pré-entraînement}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{../results/figures/pretrain_history.png}
+\caption{Courbes d'entraînement : perte (gauche) et macro-F1 de validation (droite).}
+\end{figure}
+
+\begin{resultbox}{Résultat du pré-entraînement}
+\begin{itemize}
+  \item Macro-F1 de validation : \textbf{0.671}
+  \item Précision globale : \textbf{81\%}
+  \item Meilleures classes : jogging (0.93), assis/debout (0.91), marche (0.85)
+  \item Classes difficiles : transitions posturales (0.39--0.65) car très peu d'exemples
+\end{itemize}
+\end{resultbox}
+
+\subsection{Scénario utilisateur-incrémental (44 tâches)}
+
+Dans ce scénario, chaque tâche = un nouvel utilisateur.
+Le modèle doit s'adapter à 44 personnes différentes sans oublier les précédentes.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{../results/figures/baseline_comparison_user.png}
+\caption{Notre méthode (bleu) vs.\ entraînement naïf sans replay (rouge).
+Y-axe~: macro-F1 sur chaque utilisateur après avoir appris tous les 44.}
+\end{figure}
+
+\begin{resultbox}{Comparaison avec la méthode de base}
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Méthode} & \textbf{F1 final} & \textbf{Forgetting} \\
+\midrule
+Entraînement naïf (sans replay)            & 0.483 & 0.447 \\
+\textbf{Notre méthode (replay + prototypes)} & \textbf{0.543} & \textbf{0.390} \\
+\midrule
+\textbf{Amélioration} & \textcolor{darkgreen}{$+$6\%} & \textcolor{darkgreen}{$-$13\% d'oubli} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{resultbox}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.75\linewidth]{../results/figures/summary_user.png}
+\caption{Métriques résumées~: F1 final, BWT, Forgetting, FWT.}
+\end{figure}
+
+\textbf{Observation clé~:} le système fonctionne très bien
+pour les 36 premiers sujets (HAPT + WISDM).
+La dégradation aux tâches 37--44 est due au \textbf{changement de domaine}
+(arrivée de PAMAP2 avec un placement de capteur différent
+et de nouvelles activités comme le vélo et la marche nordique).
+
+\subsection{Scénario classe-incrémental (6 tâches)}
+
+Ici, chaque tâche ajoute 2 nouvelles activités.
+Le modèle passe de 2 à 12 classes progressivement.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.7\linewidth]{../results/figures/results_matrix_class.png}
+\caption{Matrice des résultats~: classe-incrémental.
+La tâche 0 commence à F1=0.91 et descend à 0.13 à la fin.}
+\end{figure}
+
+\begin{resultbox}{Impact de la taille du tampon}
+Augmenter le tampon de 2\,000 à 5\,000 fenêtres~:
+\begin{itemize}
+  \item Forgetting~: $0.406 \rightarrow \mathbf{0.318}$ (\textbf{$-$22\% d'oubli})
+  \item BWT~: $-0.406 \rightarrow \mathbf{-0.318}$ (amélioration significative)
+\end{itemize}
+Un tampon plus grand préserve mieux les anciennes classes.
+\end{resultbox}
+
+\subsection{Anticipation d'activité}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.75\linewidth]{../results/figures/anticipation_results.png}
+\caption{Performance d'anticipation aux trois ratios d'observation.
+La ligne de base majoritaire = 30.5\%.}
+\end{figure}
+
+\begin{table}[h]
+\centering
+\caption{Résultats d'anticipation.}
+\begin{tabular}{lccc}
+\toprule
+& \textbf{p = 25\%} & \textbf{p = 50\%} & \textbf{p = 75\%} \\
+\midrule
+Précision        & 0.322 & 0.337 & 0.337 \\
+Macro-F1         & 0.093 & 0.093 & 0.094 \\
+\midrule
+Ligne de base (classe majoritaire) & \multicolumn{3}{c}{0.305} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Interprétation~:} le modèle fait légèrement mieux que la prédiction
+de la classe majoritaire. L'anticipation est \textbf{un problème ouvert difficile}~:
+les transitions entre activités sont abruptes et les classes rares
+(86 fenêtres pour ``se lever'') sont très difficiles à prédire.
+C'est une limitation connue et une piste de travail futur.
+
+
+% =============================================================
+\section{Contribution originale — Replay pondéré par incertitude}
+% =============================================================
+
+\begin{problembox}{Question du jury}
+``Qu'est-ce que \textbf{vous} avez apporté ? Votre modèle n'est qu'un
+assemblage de briques connues.''
+\end{problembox}
+
+Notre contribution originale est l'\textbf{Uncertainty-Weighted Replay Buffer}.
+
+\subsection{Idée}
+
+Le replay classique tire des exemples du tampon \textbf{uniformément au hasard}.
+Notre contribution change cette distribution d'échantillonnage~:
+
+\begin{center}
+\begin{tabular}{ll}
+\textbf{Replay classique} & $P(\mathbf{x}) = \dfrac{1}{|\mathcal{M}|}$
+  \quad (uniforme) \\[1em]
+\textbf{Notre contribution} & $P(\mathbf{x}) \propto H\bigl(f_\theta(\mathbf{x})\bigr)^\alpha$
+  \quad (entropie de prédiction)
+\end{tabular}
+\end{center}
+
+où $H(\mathbf{p}) = -\sum_c p_c \log p_c$ est l'entropie de Shannon.
+
+\subsection{Intuition}
+
+\begin{keybox}
+Quand un modèle commence à \textbf{oublier} une classe ancienne,
+il devient d'abord \textbf{incertain} sur ces exemples avant de les
+classer complètement mal.
+
+En leur donnant plus de chance d'être rejoués, on intervient
+\textbf{exactement au bon moment} --- avant que l'oubli soit irréversible.
+\end{keybox}
+
+\subsection{Paramètre $\alpha$}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{cl}
+\toprule
+$\alpha$ & Comportement \\
+\midrule
+0 & Équivalent au replay uniforme classique \\
+1 & Proportionnel à l'entropie (défaut) \\
+$>1$ & Encore plus focalisé sur les exemples incertains \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Ce paramètre permet un continuum entre le replay classique ($\alpha=0$)
+et notre méthode ($\alpha \geq 1$), facilitant l'ablation.
+
+
+% =============================================================
+\section{Visualisation --- Ce que le modèle a appris}
+% =============================================================
+
+\subsection{t-SNE des embeddings}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{../results/figures/tsne_embeddings.png}
+\caption{Réduction t-SNE en 2D des 128 dimensions du backbone
+sur 3\,000 fenêtres. Chaque couleur = une activité.}
+\label{fig:tsne}
+\end{figure}
+
+La figure~\ref{fig:tsne} est la preuve visuelle la plus forte
+que le Transformer a appris de bonnes représentations.
+Les clusters sont bien séparés~:
+\begin{itemize}
+  \item \textbf{Marche, escaliers, jogging} forment des groupes distincts
+        dans le coin supérieur et droit
+  \item \textbf{Assis/debout et allongé} forment un cluster séparé en bas à gauche
+  \item \textbf{Vélo et marche nordique} sont proches mais distinguables ---
+        ce sont deux activités à rythme régulier avec bras actifs
+  \item Les \textbf{transitions} (se lever, s'asseoir) sont dispersées
+        entre leurs activités parentes --- cohérent avec leur nature
+        intermédiaire
+\end{itemize}
+
+\textbf{Ce que ça signifie~:} le backbone apprend automatiquement
+une géométrie de l'espace d'activité.
+Deux activités visuellement proches dans le t-SNE sont réellement
+similaires sur le capteur --- le modèle n'a pas ``mémorisé''
+mais bien \textbf{compris} la structure des activités.
+
+\subsection{Poids d'attention du Transformer}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{../results/figures/attention_weights.png}
+\caption{Importance temporelle apprise par le Transformer (token CLS)
+pour 4 activités. Y-axe : poids d'attention moyen sur les 4 blocs.}
+\label{fig:attention}
+\end{figure}
+
+La figure~\ref{fig:attention} montre \textbf{quand dans la fenêtre}
+le modèle regarde~:
+\begin{itemize}
+  \item \textbf{Marche}~: pics réguliers et périodiques --- le Transformer
+        détecte le rythme des pas
+  \item \textbf{Monter les escaliers}~: pics plus espacés et irréguliers ---
+        chaque pas nécessite plus d'effort et de durée
+  \item \textbf{Descendre les escaliers}~: pics au début et à la fin
+        de la fenêtre --- le modèle cherche les moments d'impact au sol
+  \item \textbf{Assis/debout}~: attention distribuée uniformément ---
+        il n'y a pas de structure temporelle forte dans une activité statique
+\end{itemize}
+
+Ces patterns correspondent exactement à ce qu'un expert humain
+analyserait dans un signal IMU.
+
+
+% =============================================================
+\section{Ablation study --- Chaque composant justifié}
+% =============================================================
+
+\begin{problembox}{Question du jury}
+``Est-ce que les prototypes aident vraiment ?
+Est-ce que la perte contrastive change quelque chose ?''
+\end{problembox}
+
+Pour répondre, on a testé 5 configurations sur 10 tâches
+(scénario utilisateur-incrémental, 5 époques/tâche)~:
+
+\begin{table}[h]
+\centering
+\caption{Résultats de l'ablation study (macro-F1 moyen sur 10 tâches, 5 époques/tâche).}
+\label{tab:ablation}
+\begin{tabular}{clcc}
+\toprule
+\textbf{Config} & \textbf{Description} & \textbf{F1 final} & \textbf{vs baseline} \\
+\midrule
+D & Sans replay (baseline naïve)                   & 0.830 & référence \\
+C & Sans re-adaptation des prototypes              & 0.864 & \textcolor{darkgreen}{$+$0.034} \\
+B & Sans perte contrastive ($\lambda_c = 0$)       & 0.866 & \textcolor{darkgreen}{$+$0.036} \\
+\textbf{A} & \textbf{Modèle complet} & \textbf{0.891} & \textcolor{darkgreen}{$\mathbf{+0.061}$} \\
+E & Replay incertain (notre contribution)          & 0.849 & \textcolor{darkgreen}{$+$0.020} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Analyse des résultats~:}
+
+\begin{itemize}
+  \item \textbf{A vs D ($+$0.061)}~: le modèle complet gagne \textbf{6 points de F1}
+        par rapport à l'entraînement naïf --- preuve que chaque composant contribue.
+
+  \item \textbf{A vs B ($+$0.025 pour la contrastive)}~: enlever la perte contrastive
+        fait chuter le F1 de 0.891 à 0.866. La contrastive aide à mieux séparer
+        les classes dans l'espace d'embedding.
+
+  \item \textbf{A vs C ($+$0.027 pour la re-adaptation)}~: sans re-adapter les
+        prototypes après chaque mise à jour du backbone, le F1 tombe à 0.864.
+        Cela valide l'importance de maintenir l'alignement prototype--embedding.
+
+  \item \textbf{E vs D ($+$0.020)}~: le replay incertain est \textbf{meilleur
+        que le replay absent} --- notre contribution apporte une valeur réelle.
+        Cependant, E ($0.849$) reste en dessous du modèle complet A ($0.891$),
+        ce qui suggère que l'estimation de l'incertitude par entropie du softmax
+        est perfectible. Des estimateurs plus robustes (Monte Carlo Dropout,
+        ensembles) pourraient inverser ce résultat --- c'est une direction
+        de recherche future directe.
+\end{itemize}
+
+\begin{keybox}
+\textbf{Conclusion de l'ablation}~: chaque composant est justifié.
+Supprimer n'importe lequel dégrade les performances.
+La combinaison complète (A) est la meilleure configuration.
+Notre replay incertain (E) est une première preuve de concept positive
+qui ouvre une piste de recherche concrète.
+\end{keybox}
+
+
+% =============================================================
+\section{Pourquoi certains choix ont été faits}
+% =============================================================
+
+\subsection{Pourquoi pas d'apprentissage auto-supervisé ?}
+
+L'apprentissage auto-supervisé (SSL) nécessite des données non étiquetées
+en \textbf{grande quantité} (typiquement 10$\times$ plus que le supervisé).
+
+Dans notre cas~:
+\begin{itemize}
+  \item Les 3 datasets sont \textbf{entièrement étiquetés} ---
+        il serait artificiel d'ignorer les labels disponibles
+  \item Le volume (56\,861 fenêtres) est suffisant pour le supervisé
+        mais marginal pour SSL
+  \item Les méthodes SSL pour IMU (TNC, TS-TCC, SimCLR-TS) nécessitent
+        des augmentations spécifiques pouvant altérer les patterns d'activité
+\end{itemize}
+
+Notre perte contrastive supervisée (Module 1) capture l'essentiel des
+avantages du SSL (séparation inter-classes) sans ses contraintes.
+
+\textbf{Perspective future}~: pré-entraînement SSL sur des données brutes
+de smartwatch non étiquetées, suivi d'un fine-tuning supervisé.
+
+\subsection{Pourquoi pas de modèles de fondation pré-entraînés ?}
+
+Les modèles de fondation pour séries temporelles IMU sont
+\textbf{très récents (2023--2024)} et présentent des limitations~:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Modèle} & \textbf{Problème dans notre contexte} \\
+\midrule
+TimesNet, PatchTST & Conçus pour la prévision, pas la classification \\
+UniTS              & Domaine général, pas spécifique aux capteurs IMU \\
+IMU-Transformer    & Données de pré-entraînement propriétaires \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Entraîner \textbf{from scratch} sur nos 3 datasets donne un contrôle
+total sur la représentation, une adaptation directe à la structure
+IMU (50~Hz, 6~canaux), et évite le domain shift entre le domaine
+de pré-entraînement et nos données.
+
+
+% =============================================================
+\section{Résumé général}
+% =============================================================
+
+\begin{table}[h]
+\centering
+\caption{Résumé complet des performances.}
+\begin{tabular}{lll}
+\toprule
+\textbf{Expérience} & \textbf{Métrique} & \textbf{Valeur} \\
+\midrule
+Pré-entraînement
+  & Macro-F1 validation & 0.671 \\
+  & Précision & 81\% \\
+\midrule
+Utilisateur-incrémental (notre méthode)
+  & F1 final moyen & 0.543 \\
+  & Forgetting & 0.390 \\
+Utilisateur-incrémental (base naïve)
+  & F1 final moyen & 0.483 \\
+  & Forgetting & 0.447 \\
+\textbf{Amélioration}
+  & $\Delta$ F1 & \textcolor{darkgreen}{$+$0.059} \\
+  & $\Delta$ Forgetting & \textcolor{darkgreen}{$-$0.057} \\
+\midrule
+Classe-incrémental (tampon 5k)
+  & F1 final moyen & 0.159 \\
+  & Forgetting & 0.318 \\
+\midrule
+Anticipation ($p=75\%$)
+  & Précision & 0.337 \\
+  & Macro-F1 & 0.094 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{resultbox}{Ce que ce projet démontre}
+\begin{enumerate}
+  \item Le backbone Transformer apprend de bonnes représentations des activités
+        IMU (81\% de précision en pré-entraînement).
+  \item Notre combinaison replay + prototypes + perte contrastive
+        \textbf{réduit l'oubli de 13\%} par rapport à l'entraînement naïf
+        dans le scénario utilisateur-incrémental.
+  \item Un tampon de replay plus grand préserve mieux les anciennes classes
+        dans le scénario classe-incrémental ($-22\%$ d'oubli).
+  \item L'anticipation d'activité reste un problème difficile et ouvert,
+        motivant des travaux futurs sur l'entraînement conjoint et
+        le rééquilibrage des classes.
+\end{enumerate}
+\end{resultbox}
+
+\subsection{Perspectives et travaux futurs}
+
+\begin{itemize}
+  \item \textbf{Anticipation} : entraîner le backbone et le LSTM conjointement
+        (plutôt que de geler le backbone)
+  \item \textbf{Classes rares} : utiliser du suréchantillonnage
+        (SMOTE) pour les transitions posturales
+  \item \textbf{Changement de domaine} : ajouter un adaptateur de domaine
+        pour gérer les différents placements de capteurs
+  \item \textbf{EWC} : comparer formellement avec Elastic Weight Consolidation
+        (implémenté dans \texttt{src/training/ewc\_trainer.py})
+  \item \textbf{MobiAct} : intégrer ce 4\textsuperscript{ème} dataset
+        (chutes, AVQ) pour enrichir le scénario de reconnaissance
+\end{itemize}
+
+\end{document}

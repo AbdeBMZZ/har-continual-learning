@@ -20,9 +20,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .backbone         import IMUTransformerEncoder, build_backbone
-from .prototype_memory import PrototypeMemory
-from .replay_buffer    import ReplayBuffer
+from .backbone              import IMUTransformerEncoder, build_backbone
+from .prototype_memory      import PrototypeMemory
+from .replay_buffer         import ReplayBuffer
+from .uncertainty_replay    import UncertaintyWeightedReplayBuffer
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +155,8 @@ class HARContinualModel(nn.Module):
         n_classes:           int   = 13,
         replay_capacity:     int   = 2000,
         contrastive_weight:  float = 0.1,
+        uncertainty_replay:  bool  = False,
+        uncertainty_alpha:   float = 1.0,
     ):
         super().__init__()
 
@@ -162,10 +165,15 @@ class HARContinualModel(nn.Module):
         self.har_head            = ContinualHARHead(d_model, n_classes)
         self.anticipation_head   = AnticipationHead(d_model, n_classes)
         self.contrastive_weight  = contrastive_weight
+        self.uncertainty_replay  = uncertainty_replay
 
-        self.replay_buffer = ReplayBuffer(
+        BufferClass = UncertaintyWeightedReplayBuffer if uncertainty_replay \
+                      else ReplayBuffer
+        kwargs = dict(alpha=uncertainty_alpha) if uncertainty_replay else {}
+        self.replay_buffer = BufferClass(
             capacity=replay_capacity,
             n_classes=n_classes,
+            **kwargs,
         )
 
     # ------------------------------------------------------------------
@@ -238,10 +246,14 @@ class HARContinualModel(nn.Module):
         # ---- Replay batch (if buffer has data) ----
         loss_replay = torch.tensor(0.0, device=device)
         if len(self.replay_buffer) >= replay_batch_size:
-            rx, ry       = self.replay_buffer.sample(replay_batch_size, device=device)
-            emb_replay   = self.backbone(rx)
+            if self.uncertainty_replay:
+                rx, ry = self.replay_buffer.sample_uncertain(
+                    self, replay_batch_size, device=device)
+            else:
+                rx, ry = self.replay_buffer.sample(replay_batch_size, device=device)
+            emb_replay    = self.backbone(rx)
             logits_replay = self.har_head(emb_replay)
-            loss_replay  = F.cross_entropy(logits_replay, ry)
+            loss_replay   = F.cross_entropy(logits_replay, ry)
 
         # ---- Contrastive loss on current batch ----
         loss_contrast = self.har_head.contrastive_loss(emb_curr, y)
@@ -316,7 +328,9 @@ def build_model(n_classes: int = 13,
                 n_heads: int = 4,
                 n_blocks: int = 4,
                 replay_capacity: int = 2000,
-                contrastive_weight: float = 0.1) -> HARContinualModel:
+                contrastive_weight: float = 0.1,
+                uncertainty_replay: bool = False,
+                uncertainty_alpha: float = 1.0) -> HARContinualModel:
     """Build the full model with sensible defaults."""
     backbone_cfg = dict(d_model=d_model, n_heads=n_heads, n_blocks=n_blocks,
                         ffn_dim=d_model * 2, in_channels=6)
@@ -325,4 +339,6 @@ def build_model(n_classes: int = 13,
         n_classes=n_classes,
         replay_capacity=replay_capacity,
         contrastive_weight=contrastive_weight,
+        uncertainty_replay=uncertainty_replay,
+        uncertainty_alpha=uncertainty_alpha,
     )
