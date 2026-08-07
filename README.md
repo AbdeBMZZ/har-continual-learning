@@ -2,9 +2,6 @@
 
 **Adaptive and Continual Learning for Human Activity Recognition using IMU Sensors**
 
-Final Year Project (PFE) — ESI Algeria, 2025/2026  
-Supervisor: Attal Ferhat (LISSI, UPEC Paris) | Co-supervisor: MEZIANI Lila
-
 ---
 
 ## Overview
