@@ -50,6 +50,7 @@ UNIFIED_LABELS: Dict[int, str] = {
     10: "sit_to_stand",
     11: "sit_to_lie",
     12: "lie_to_sit",
+    13: "fall",
     0: "unknown",
 }
 
@@ -120,6 +121,13 @@ MOBIACT_REMAP = {
     9:  0,   # CSO → discard
     10: 4,   # SBW → sitting_standing
     11: 6,   # SBE → lying
+    # Fall activities (MobiAct v2)
+    12: 13,  # FOL — forward-lying
+    13: 13,  # FKL — front-knees-lying
+    14: 13,  # BSC — back-sitting-chair
+    15: 13,  # SDL — syncope
+    16: 13,  # BSF — back-sitting-floor
+    17: 13,  # FSF — front-sitting-floor
 }
 
 DATASET_REMAP: Dict[str, Dict[int, int]] = {

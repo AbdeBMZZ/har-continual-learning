@@ -151,12 +151,14 @@ def demo_continual(ds, model, X, y, subjects):
 
 
 # ── DEMO 3: Activity Anticipation ─────────────────────────────────────────────
-def demo_anticipation(model, X, y):
+def demo_anticipation(model, X, y, subjects):
     banner("DEMO 3 — Activity Anticipation (predict next activity)")
     print("Given 5 partial windows (50% observed), predicting what comes next...\n")
 
-    ant_ds = AnticipationDataset(X, y, obs_ratio=0.50,
+    ant_ds = AnticipationDataset(X, y, subjects=subjects, obs_ratio=0.50,
                                   seq_len=5, transitions_only=True)
+    maj_f1 = ant_ds.majority_baseline()
+    print(f"  Majority baseline F1 (transitions): {maj_f1:.4f}\n")
 
     rng = np.random.default_rng(7)
     idx = rng.choice(len(ant_ds), 8, replace=False)
@@ -199,7 +201,7 @@ def main():
 
     demo_recognition(ds, model, X, y)
     demo_continual(ds, model, X, y, subjects)
-    demo_anticipation(model, X, y)
+    demo_anticipation(model, X, y, subjects)
 
     banner("Summary")
     print("  Module 1 (Recognition):   Transformer backbone + nearest-mean classifier")

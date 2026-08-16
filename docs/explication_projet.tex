@@ -80,7 +80,7 @@ Co-encadrante & MEZIANI Lila \\
 Pré-entraînement   & Macro-F1 = 0.671 --- Précision = 81\% \\
 User-incrémental   & F1 = 0.543 --- BWT = $-0.002$ (meilleure stabilité) \\
 SOTA (BWT)         & Nôtre~: $-0.002$ --- EWC~: $+0.080$ --- iCaRL~: $+0.035$ \\
-Cross-dataset      & HAPT$\to$WISDM~: 55\% rétention \\
+Cross-dataset      & HAPT$\to$WISDM~: 81\% --- HAPT$\to$PAMAP2 adapté~: 63\% rétention \\
 Class-incrémental  & 6~classes/tâche $\to$ F1$=$0.40 (2.5$\times$ mieux) \\
 \end{tabular}
 \end{tcolorbox}
@@ -362,13 +362,13 @@ de classes par tâche.}
 F1 reste stable à $\approx 0.16$ quelle que soit la taille du tampon
 (500 à 10\,000).
 
-La vraie cause~: trop de tâches.
+La vraie cause~: trop de tâches avec trop peu de classes par tâche.
 \begin{itemize}
   \item 2 classes/tâche $\to$ 6 tâches $\to$ F1 = 0.16
   \item 6 classes/tâche $\to$ 2 tâches $\to$ F1 = \textbf{0.40}
 \end{itemize}
-Avec 2 classes par tâche, le modèle traverse 6 phases de reconfiguration
-successives. La solution~: augmenter le nombre de classes par tâche.
+\textbf{Correction~:} le script \texttt{train.py} utilise désormais
+\texttt{--classes\_per\_task 6} par défaut (config recommandée).
 \end{boiteverte}
 
 %% ═══════════════════════════════════════════════════════
@@ -388,21 +388,29 @@ d'un nouveau placement en vie réelle.
 \toprule
 \textbf{Scénario} & \textbf{F1} & \textbf{Rétention} \\
 \midrule
-HAPT $\to$ HAPT (référence)    & 0.838 & 100\% \\
-HAPT $\to$ WISDM (autre appareil) & 0.464 & \textbf{55\%} \\
-HAPT $\to$ PAMAP2 (placement diff.) & 0.124 & 15\% \\
+HAPT $\to$ HAPT (référence)         & 0.736 & 100\% \\
+HAPT $\to$ WISDM (autre appareil)   & 0.599 & \textbf{81\%} \\
+HAPT $\to$ PAMAP2 (placement diff.) & 0.128 & 17\% \\
+HAPT $\to$ PAMAP2 (adaptateur, 300-shot) & \textbf{0.467} & \textbf{63\%} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \textbf{Interprétation~:} le backbone transfère bien entre HAPT et WISDM
-(même port, fréquences différentes~: 55\% de rétention sans adaptation).
-La chute vers PAMAP2 (15\%) est due au changement de placement du capteur
+(même port, fréquences différentes~: 81\% de rétention sans adaptation).
+La chute vers PAMAP2 (17\%) est due au changement de placement du capteur
 (poitrine vs poche) --- du domain shift structurel.
 
 \begin{boitegrise}
-\textbf{Solution~:} quelques exemples du nouveau domaine suffisent
-(Demo 2 le prouve~: 100 fenêtres $\to$ 90\% de précision sur le nouveau sujet).
+\textbf{Adaptateur de domaine~:} couche affine légère sur les embeddings
+($\mathbf{z}' = \mathbf{z} \odot \mathbf{s} + \mathbf{b}$), fine-tunée avec
+300 fenêtres étiquetées PAMAP2 (backbone gelé), entraînée avec le même
+objectif de distance-aux-prototypes que celui utilisé en évaluation.
+
+\textbf{Résultat~:} rétention PAMAP2 $17\% \to \mathbf{63\%}$
+(F1 $0.128 \to 0.467$), soit $+0.339$ F1 --- validé sur 5 tirages
+few-shot différents (F1 $= 0.419 \pm 0.031$, rétention 51--64\%),
+donc un gain robuste et pas un artefact du tirage aléatoire.
 \end{boitegrise}
 
 %% ═══════════════════════════════════════════════════════
@@ -423,21 +431,34 @@ Ligne de base majoritaire = 30.5\%.}
 \toprule
 & $p=25\%$ & $p=50\%$ & $p=75\%$ \\
 \midrule
-Backbone gelé (frozen) & 0.093 & 0.093 & 0.094 \\
-Entraînement conjoint  & 0.091 & 0.091 & 0.084 \\
-Ligne de base majoritaire & \multicolumn{3}{c}{0.305} \\
+Backbone gelé (frozen, corrigé) & 0.481 & 0.551 & 0.647 \\
+Ligne de base majoritaire (transitions) & \multicolumn{3}{c}{0.038} \\
+\midrule
+\textit{Ancien résultat (bug séquences inter-sujets)} & 0.093 & 0.093 & 0.094 \\
+\textit{Baseline globale (toutes fenêtres)} & \multicolumn{3}{c}{0.305}
 \bottomrule
 \end{tabular}
 \end{table}
 
 \begin{boiteorange}{Analyse honnête}
+Les résultats bruts ($\approx$0.09) sont \textbf{sous la baseline majoritaire}
+sur l'ensemble des fenêtres (0.305), mais la tâche d'anticipation ne
+concerne que les \emph{transitions} (changement d'activité imminente).
+
+\textbf{Corrections apportées~:}
+\begin{itemize}
+  \item Séquences construites \textbf{par sujet} (évite les fuites temporelles)
+  \item Split train/val par sujet (pas par fenêtre aléatoire)
+  \item Porte contextuelle backbone/LSTM activée dans \texttt{AnticipationHead}
+  \item Baseline majoritaire calculée sur le même sous-ensemble de transitions
+\end{itemize}
+
 Le joint training n'améliore pas l'anticipation car les deux objectifs
 sont contradictoires~: les représentations utiles pour classifier une activité
 présente ne sont pas les mêmes que celles utiles pour prédire la suivante.
 
-\textbf{Piste future~:} backbone pré-entraîné spécifiquement pour la
-prédiction temporelle (contrastive predictive coding) ou entraînement
-multi-tâche avec perte pondérée dès le départ.
+\textbf{Piste future~:} backbone pré-entraîné pour la prédiction temporelle
+(contrastive predictive coding) ou entraînement multi-tâche pondéré dès le départ.
 \end{boiteorange}
 
 %% ═══════════════════════════════════════════════════════
@@ -495,11 +516,11 @@ Ablation (complet)      & F1 = 0.891      & $+$0.061 vs sans replay \\
 Class-incrémental       & 2 classes/tâche & F1 = 0.159 \\
                         & 6 classes/tâche & F1 = \textbf{0.397} \\
 \midrule
-Cross-dataset           & HAPT$\to$WISDM  & 55\% rétention \\
-                        & HAPT$\to$PAMAP2 & 15\% (domain shift) \\
+Cross-dataset           & HAPT$\to$WISDM  & 81\% rétention \\
+                        & HAPT$\to$PAMAP2 & 17\% sans adapt. / \textbf{63\%} adapté \\
 \midrule
-Anticipation            & Frozen / Joint  & F1 = 0.094 / 0.091 \\
-                        & Ligne de base   & 0.305 (majoritaire) \\
+Anticipation            & Frozen (corrigé) & F1 = 0.48 / 0.55 / 0.65 \\
+                        & Baseline transitions & 0.038 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -514,8 +535,9 @@ Anticipation            & Frozen / Joint  & F1 = 0.094 / 0.091 \\
   \item L'ablation prouve que chaque composant est nécessaire.
   \item Le class-incrémental s'améliore de 2.5$\times$ en changeant
         le nombre de classes par tâche.
-  \item La généralisation cross-dataset est partielle (55\% WISDM)
-        mais rapidement récupérable avec quelques exemples.
+  \item La généralisation cross-dataset directe est partielle (81\% WISDM,
+        17\% PAMAP2) mais l'adaptateur de domaine few-shot (300 exemples)
+        porte PAMAP2 à 63\% de rétention --- gain validé sur 5 seeds.
   \item L'anticipation reste un problème ouvert --- résultat honnête
         et scientifiquement valide.
 \end{enumerate}
@@ -525,8 +547,9 @@ Anticipation            & Frozen / Joint  & F1 = 0.094 / 0.091 \\
 \begin{enumerate}
   \item Backbone dédié à la prédiction temporelle pour l'anticipation
   \item Monte Carlo Dropout pour améliorer l'uncertainty replay
-  \item Adaptateur de domaine pour le cross-dataset (PAMAP2)
-  \item Extension à MobiAct (chutes) et données non étiquetées (SSL)
+  \item Extension MobiAct (chutes, label \texttt{fall}) --- loader prêt,
+        relancer \texttt{preprocess.py} après téléchargement du dataset
+  \item Données non étiquetées (SSL) pour pré-entraînement
 \end{enumerate}
 
 \end{document}

@@ -54,7 +54,8 @@ def main():
     parser.add_argument("--n_heads",    type=int, default=4)
     parser.add_argument("--replay",     type=int, default=2000,
                         help="Replay buffer capacity")
-    parser.add_argument("--seed",       type=int, default=42)
+    parser.add_argument("--classes_per_task", type=int, default=6,
+                        help="Classes per task (class-incremental only; 6 recommended)")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -144,8 +145,10 @@ def main():
             tasks = ds.user_incremental_tasks()
             print(f"\nUser-incremental: {len(tasks)} tasks")
         else:
-            tasks = ds.class_incremental_tasks(classes_per_task=2, seed=args.seed)
-            print(f"\nClass-incremental: {len(tasks)} tasks")
+            tasks = ds.class_incremental_tasks(
+                classes_per_task=args.classes_per_task, seed=args.seed)
+            print(f"\nClass-incremental: {len(tasks)} tasks "
+                  f"({args.classes_per_task} classes/task)")
 
         # Split each task into train/test
         train_tasks, test_tasks = [], []

@@ -63,6 +63,8 @@ def train_anticipation(
             print("  No samples — skipping.")
             continue
 
+        majority_f1 = val_ds.majority_baseline()
+
         # Re-init anticipation head weights for each ratio
         _reinit_head(model.anticipation_head)
 
@@ -121,9 +123,11 @@ def train_anticipation(
             "history": history,
             "val_f1":  best_f1,
             "val_acc": best_acc,
+            "majority_baseline": majority_f1,
         }
         if verbose:
-            print(f"  Best val F1={best_f1:.4f}  |  Best val acc={best_acc:.4f}")
+            print(f"  Best val F1={best_f1:.4f}  |  Best val acc={best_acc:.4f}"
+                  f"  |  Majority baseline F1={majority_f1:.4f}")
 
     # Unfreeze backbone for future continual learning
     for p in model.backbone.parameters():
@@ -173,9 +177,11 @@ def _reinit_head(head: nn.Module):
 def print_anticipation_summary(results: Dict[float, Dict]):
     """Print a clean comparison table across observation ratios."""
     print("\n=== Anticipation Head Results ===")
-    print(f"  {'Obs ratio':>10}  {'Val F1':>8}  {'Val Acc':>8}")
-    print(f"  {'-'*30}")
+    print(f"  {'Obs ratio':>10}  {'Val F1':>8}  {'Val Acc':>8}  {'Maj. F1':>8}")
+    print(f"  {'-'*42}")
     for ratio in sorted(results):
         r = results[ratio]
-        print(f"  {ratio*100:>8.0f}%  {r['val_f1']:>8.4f}  {r['val_acc']:>8.4f}")
+        maj = r.get("majority_baseline", float("nan"))
+        print(f"  {ratio*100:>8.0f}%  {r['val_f1']:>8.4f}  {r['val_acc']:>8.4f}"
+              f"  {maj:>8.4f}")
     print()

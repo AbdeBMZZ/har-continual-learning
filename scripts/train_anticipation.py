@@ -66,7 +66,7 @@ def main():
     # This is the meaningful anticipation task (predicting activity CHANGES)
     print("\nBuilding anticipation datasets (transitions only)...")
     ant_datasets = build_anticipation_datasets(
-        X, y, test_ratio=0.2, seq_len=args.seq_len,
+        X, y, subjects=subjects, test_ratio=0.2, seq_len=args.seq_len,
         transitions_only=True)
 
     for ratio, (tr, va) in ant_datasets.items():

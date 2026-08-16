@@ -95,8 +95,9 @@ python scripts/train.py --mode pretrain --data data/processed --epochs 50
 python scripts/train.py --mode continual --scenario user --data data/processed \
        --checkpoint checkpoints/pretrained.pt
 
-# 6. Continual learning (class-incremental)
-python scripts/train.py --mode continual --scenario class --data data/processed
+# 6. Continual learning (class-incremental, 6 classes/task recommended)
+python scripts/train.py --mode continual --scenario class --data data/processed \
+       --classes_per_task 6
 ```
 
 ---

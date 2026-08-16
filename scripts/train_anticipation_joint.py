@@ -131,8 +131,9 @@ def main():
     model.backbone.load_state_dict(state)
     print(f"Backbone chargé. Entraînement conjoint (backbone dégelé).\n")
 
-    datasets = build_anticipation_datasets(X, y, test_ratio=0.2,
-                                            seq_len=5, transitions_only=True)
+    datasets = build_anticipation_datasets(
+        X, y, subjects=subjects, test_ratio=0.2,
+        seq_len=5, transitions_only=True)
 
     print("=== Entraînement conjoint backbone + LSTM ===")
     results = train_joint(model, datasets,

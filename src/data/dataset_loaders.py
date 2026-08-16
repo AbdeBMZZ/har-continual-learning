@@ -264,6 +264,13 @@ MOBIACT_LABEL_MAP = {
     "SBW": 10,  # sit on bench
     "SBE": 11,  # sit on bed
     "SIT": 1,   # sitting (alias → standing/sitting merged)
+    # Falls (MobiAct v2 — activity code in filename prefix)
+    "FOL": 12,  # forward-lying
+    "FKL": 13,  # front-knees-lying
+    "BSC": 14,  # back-sitting-chair
+    "SDL": 15,  # syncope
+    "BSF": 16,  # back-sitting-floor
+    "FSF": 17,  # front-sitting-floor
 }
 
 MOBIACT_HZ   = 87

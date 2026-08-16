@@ -51,13 +51,14 @@ class ContinualHARHead(nn.Module):
             nn.Dropout(0.1),
             nn.Linear(d_model // 2, n_classes),
         )
-
+           
         # Prototype memory for continual inference
         self.prototype_memory = PrototypeMemory(d_model=d_model)
 
     def forward(self, embeddings: torch.Tensor) -> torch.Tensor:
         """Standard classification forward (pre-training).
 
+     
         Returns:
             (B, n_classes) logits
         """
@@ -111,6 +112,7 @@ class AnticipationHead(nn.Module):
             dropout=dropout if lstm_layers > 1 else 0.0,
         )
 
+        self.emb_proj = nn.Linear(d_model, lstm_hidden)
         self.classifier = nn.Sequential(
             nn.LayerNorm(lstm_hidden),
             nn.Linear(lstm_hidden, n_classes),
@@ -129,9 +131,14 @@ class AnticipationHead(nn.Module):
         Returns:
             (B, n_classes) — logits for the next activity
         """
-        lstm_out, _ = self.lstm(embedding_seq)   # (B, S, lstm_hidden)
-        last        = lstm_out[:, -1]             # (B, lstm_hidden)
-        return self.classifier(last)
+        lstm_out, _ = self.lstm(embedding_seq)    # (B, S, lstm_hidden)
+        last_lstm   = lstm_out[:, -1]             # (B, lstm_hidden)
+        last_emb    = embedding_seq[:, -1]        # (B, d_model)
+        gate        = torch.sigmoid(
+            self.context_gate(torch.cat([last_emb, last_lstm], dim=-1))
+        )
+        fused = gate * self.emb_proj(last_emb) + (1 - gate) * last_lstm
+        return self.classifier(fused)
 
 
 # ---------------------------------------------------------------------------

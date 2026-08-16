@@ -1,7 +1,7 @@
 """
 Dataset for activity anticipation training.
 
-For each consecutive pair of windows (w_t, w_{t+1}):
+For each consecutive pair of windows (w_t, w_{t+1}) within the SAME subject:
   - Input:  first p% of w_t  →  partial observation
   - Target: label of w_{t+1} →  next activity to predict
 
@@ -25,21 +25,41 @@ except (ImportError, OSError):
     TORCH_OK = False
 
 
+def _build_subject_sequences(
+    X: np.ndarray,
+    y: np.ndarray,
+    obs_len: int,
+    seq_len: int,
+    transitions_only: bool,
+) -> Tuple[List[np.ndarray], List[int]]:
+    """Build anticipation samples from one subject's contiguous windows."""
+    contexts, targets = [], []
+
+    for i in range(seq_len, len(X) - 1):
+        ctx_wins  = X[i - seq_len: i]
+        ctx_trunc = ctx_wins[:, :obs_len, :]
+        next_label = int(y[i])
+
+        if transitions_only and next_label == int(y[i - 1]):
+            continue
+
+        contexts.append(ctx_trunc)
+        targets.append(next_label)
+
+    return contexts, targets
+
+
 class AnticipationDataset:
     """
     Builds (context_windows, next_label) pairs from a HARDataset.
 
-    For every window at position t, if the next window t+1 has a
-    DIFFERENT label (i.e. an activity transition is imminent), we
-    create a training sample:
-      - context: S partial windows ending at t, each truncated to p*T samples
-      - target:  label of window t+1
-
-    This teaches the model to anticipate transitions from context.
+    Sequences are built **within each subject** so that consecutive windows
+    are truly temporally adjacent (critical for anticipation).
 
     Args:
         X:             (N, T, C) windows
         y:             (N,)     labels
+        subjects:      (N,)     subject IDs — required for correct sequencing
         obs_ratio:     fraction of each window to observe (0.25, 0.50, 0.75)
         seq_len:       S — number of consecutive windows as context
         transitions_only: if True, only keep samples where label changes
@@ -48,6 +68,7 @@ class AnticipationDataset:
     def __init__(self,
                  X: np.ndarray,
                  y: np.ndarray,
+                 subjects: np.ndarray | None = None,
                  obs_ratio: float = 0.50,
                  seq_len: int = 5,
                  transitions_only: bool = False):
@@ -59,24 +80,30 @@ class AnticipationDataset:
 
         contexts, targets = [], []
 
-        # Slide over all valid positions
-        for i in range(seq_len, len(X) - 1):
-            # Context: seq_len consecutive windows, each truncated
-            ctx_wins = X[i - seq_len: i]          # (S, T, C)
-            ctx_trunc = ctx_wins[:, :self.obs_len, :]  # (S, obs_len, C)
-
-            next_label = int(y[i])                 # label of next window
-
-            if transitions_only:
-                current_label = int(y[i - 1])
-                if next_label == current_label:
+        if subjects is None:
+            # Fallback: treat entire array as one stream (legacy behaviour)
+            ctx, tgt = _build_subject_sequences(
+                X, y, self.obs_len, seq_len, transitions_only)
+            contexts.extend(ctx)
+            targets.extend(tgt)
+        else:
+            for subj in np.unique(subjects):
+                mask = subjects == subj
+                X_s, y_s = X[mask], y[mask]
+                if len(X_s) <= seq_len + 1:
                     continue
+                ctx, tgt = _build_subject_sequences(
+                    X_s, y_s, self.obs_len, seq_len, transitions_only)
+                contexts.extend(ctx)
+                targets.extend(tgt)
 
-            contexts.append(ctx_trunc)
-            targets.append(next_label)
-
-        self.X = np.array(contexts, dtype=np.float32)  # (N, S, obs_len, C)
-        self.y = np.array(targets,  dtype=np.int64)     # (N,)
+        if contexts:
+            self.X = np.array(contexts, dtype=np.float32)
+            self.y = np.array(targets,  dtype=np.int64)
+        else:
+            self.X = np.zeros((0, seq_len, self.obs_len, X.shape[-1]),
+                              dtype=np.float32)
+            self.y = np.zeros(0, dtype=np.int64)
 
     def __len__(self) -> int:
         return len(self.X)
@@ -94,47 +121,78 @@ class AnticipationDataset:
         return DataLoader(self, batch_size=batch_size,
                           shuffle=shuffle, num_workers=0)
 
+    def majority_baseline(self) -> float:
+        """Macro-F1 of always predicting the most frequent class."""
+        if len(self.y) == 0:
+            return 0.0
+        from ..evaluation.metrics import macro_f1
+        majority = int(np.bincount(self.y).argmax())
+        preds    = np.full(len(self.y), majority, dtype=np.int64)
+        return macro_f1(self.y, preds)
+
     def summary(self) -> str:
         unique, counts = np.unique(self.y, return_counts=True)
         lines = [
             f"AnticipationDataset — {len(self)} samples",
             f"  obs_ratio={self.obs_ratio}  seq_len={self.seq_len}",
             f"  context shape: {self.X.shape}",
+            f"  majority baseline F1: {self.majority_baseline():.4f}",
             f"  classes: {dict(zip(unique.tolist(), counts.tolist()))}",
         ]
         return "\n".join(lines)
 
 
-def build_anticipation_datasets(X: np.ndarray,
-                                 y: np.ndarray,
-                                 test_ratio: float = 0.2,
-                                 seq_len: int = 5,
-                                 seed: int = 42,
-                                 transitions_only: bool = True):
+def build_anticipation_datasets(
+    X: np.ndarray,
+    y: np.ndarray,
+    subjects: np.ndarray | None = None,
+    test_ratio: float = 0.2,
+    seq_len: int = 5,
+    seed: int = 42,
+    transitions_only: bool = True,
+):
     """
     Build train/val anticipation datasets for all three obs ratios.
+
+    Split is by **subject** to avoid temporal leakage between train and val.
 
     Returns:
         {0.25: (train_ds, val_ds), 0.50: ..., 0.75: ...}
     """
-    rng    = np.random.default_rng(seed)
-    N      = len(X)
-    idx    = np.arange(N)
-    rng.shuffle(idx)
-    n_val  = int(N * test_ratio)
-    val_idx, train_idx = idx[:n_val], idx[n_val:]
+    rng = np.random.default_rng(seed)
 
-    X_train, y_train = X[train_idx], y[train_idx]
-    X_val,   y_val   = X[val_idx],   y[val_idx]
+    if subjects is not None:
+        unique_subjects = np.unique(subjects)
+        rng.shuffle(unique_subjects)
+        n_val = max(1, int(len(unique_subjects) * test_ratio))
+        val_subjects  = set(unique_subjects[:n_val])
+        train_mask    = np.array([s not in val_subjects for s in subjects])
+        val_mask      = ~train_mask
+        X_train, y_train = X[train_mask], y[train_mask]
+        X_val,   y_val   = X[val_mask],   y[val_mask]
+        s_train = subjects[train_mask]
+        s_val   = subjects[val_mask]
+    else:
+        idx = np.arange(len(X))
+        rng.shuffle(idx)
+        n_val = int(len(X) * test_ratio)
+        train_idx, val_idx = idx[n_val:], idx[:n_val]
+        X_train, y_train = X[train_idx], y[train_idx]
+        X_val,   y_val   = X[val_idx],   y[val_idx]
+        s_train, s_val   = None, None
 
     result = {}
     for ratio in [0.25, 0.50, 0.75]:
-        train_ds = AnticipationDataset(X_train, y_train,
-                                        obs_ratio=ratio, seq_len=seq_len,
-                                        transitions_only=transitions_only)
-        val_ds   = AnticipationDataset(X_val,   y_val,
-                                        obs_ratio=ratio, seq_len=seq_len,
-                                        transitions_only=transitions_only)
+        train_ds = AnticipationDataset(
+            X_train, y_train, subjects=s_train,
+            obs_ratio=ratio, seq_len=seq_len,
+            transitions_only=transitions_only,
+        )
+        val_ds = AnticipationDataset(
+            X_val, y_val, subjects=s_val,
+            obs_ratio=ratio, seq_len=seq_len,
+            transitions_only=transitions_only,
+        )
         result[ratio] = (train_ds, val_ds)
 
     return result

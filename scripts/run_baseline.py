@@ -35,7 +35,8 @@ def main():
     parser.add_argument("--epochs",     type=int,   default=10)
     parser.add_argument("--batch_size", type=int,   default=64)
     parser.add_argument("--lr",         type=float, default=5e-5)
-    parser.add_argument("--seed",       type=int,   default=42)
+    parser.add_argument("--classes_per_task", type=int, default=6,
+                        help="Classes per task (class-incremental only)")
     args = parser.parse_args()
 
     import torch
@@ -59,7 +60,8 @@ def main():
     if args.scenario == "user":
         tasks = ds.user_incremental_tasks()
     else:
-        tasks = ds.class_incremental_tasks(classes_per_task=2, seed=args.seed)
+        tasks = ds.class_incremental_tasks(
+            classes_per_task=args.classes_per_task, seed=args.seed)
 
     train_tasks, test_tasks = [], []
     for task in tasks:
