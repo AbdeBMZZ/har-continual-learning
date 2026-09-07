@@ -16,6 +16,7 @@ Label mapping follows the semantic grouping from Amrani 2025:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -196,6 +197,64 @@ def homogenize_sample(signal: np.ndarray,
     return windows, window_labels
 
 
+def _assign_global_subject_id(
+    registry: Dict[Tuple[str, int], int],
+    next_id: int,
+    dataset: str,
+    local_id: int,
+) -> Tuple[int, int]:
+    """Map (dataset, local participant id) → unique global subject id."""
+    key = (dataset, int(local_id))
+    if key not in registry:
+        registry[key] = next_id
+        next_id += 1
+    return registry[key], next_id
+
+
+def build_subject_meta(registry: Dict[Tuple[str, int], int]) -> Dict[str, dict]:
+    """Build JSON-serializable metadata for global subject ids."""
+    meta: Dict[str, dict] = {}
+    for (dataset, local_id), global_id in sorted(
+        registry.items(), key=lambda item: item[1]
+    ):
+        meta[str(global_id)] = {
+            "dataset": dataset,
+            "local_id": int(local_id),
+            "slug": f"{dataset}-{local_id}",
+        }
+    return meta
+
+
+def load_subject_meta(save_dir: str | Path) -> Dict[str, dict]:
+    """Load subject_meta.json written by save_processed()."""
+    path = Path(save_dir) / "subject_meta.json"
+    if not path.exists():
+        return {}
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def resolve_subject(
+    meta: Dict[str, dict],
+    dataset: str,
+    local_id: int,
+) -> Optional[int]:
+    """Return global subject id for a dataset-local participant, if present."""
+    slug = f"{dataset}-{local_id}"
+    for gid, info in meta.items():
+        if info.get("slug") == slug:
+            return int(gid)
+    return None
+
+
+def subject_slug(global_id: int, meta: Dict[str, dict]) -> str:
+    """Human-readable id: « wisdm-5 » or fallback to global id."""
+    info = meta.get(str(global_id))
+    if info:
+        return info["slug"]
+    return str(global_id)
+
+
 def build_unified_dataset(data_root: str | Path,
                           datasets: Optional[List[str]] = None,
                           discard_unknown: bool = True,
@@ -211,9 +270,10 @@ def build_unified_dataset(data_root: str | Path,
     Returns:
         X:         (N, WINDOW_SIZE, 6)  float32
         y:         (N,)                 int64  — unified labels
-        subjects:  (N,)                 int32  — subject IDs
+        subjects:  (N,)                 int32  — globally unique subject IDs
         origins:   (N,)                 str    — dataset name per window
         stats:     dict of (mean, std) per dataset for later normalization
+        subject_meta: dict global_id → {dataset, local_id, slug}
     """
     data_root = Path(data_root)
     if datasets is None:
@@ -221,6 +281,8 @@ def build_unified_dataset(data_root: str | Path,
 
     all_X, all_y, all_subjects, all_origins = [], [], [], []
     stats = {}
+    subject_registry: Dict[Tuple[str, int], int] = {}
+    next_subject_id = 1
 
     for name in datasets:
         folder = data_root / name
@@ -243,9 +305,12 @@ def build_unified_dataset(data_root: str | Path,
             wins, wlabels = homogenize_sample(signal, labels, name, hz, unit)
             if len(wins) == 0:
                 continue
+            global_id, next_subject_id = _assign_global_subject_id(
+                subject_registry, next_subject_id, name, subject_id,
+            )
             ds_windows.append(wins)
             ds_labels.append(wlabels)
-            ds_subjects.append(np.full(len(wins), subject_id, dtype=np.int32))
+            ds_subjects.append(np.full(len(wins), global_id, dtype=np.int32))
 
         if not ds_windows:
             continue
@@ -275,9 +340,11 @@ def build_unified_dataset(data_root: str | Path,
         all_subjects.append(s_ds)
         all_origins.extend([name] * len(X_ds))
 
+        local_subjects = sorted({lid for (ds, lid) in subject_registry if ds == name})
+        global_subjects = sorted(np.unique(s_ds).tolist())
         print(f"[{name}] {len(X_ds)} windows | "
               f"labels: {sorted(np.unique(y_ds).tolist())} | "
-              f"subjects: {np.unique(s_ds).tolist()}")
+              f"local subjects: {local_subjects} → global ids: {global_subjects}")
 
     if not all_X:
         raise RuntimeError("No datasets were loaded. Check data/raw/ folders.")
@@ -286,13 +353,18 @@ def build_unified_dataset(data_root: str | Path,
     y       = np.concatenate(all_y,       axis=0)
     subjects= np.concatenate(all_subjects, axis=0)
     origins = np.array(all_origins)
+    subject_meta = build_subject_meta(subject_registry)
 
-    return X, y, subjects, origins, stats
+    print(f"\nGlobal subjects: {len(subject_meta)} unique participants "
+          f"(one id per dataset-local person)")
+
+    return X, y, subjects, origins, stats, subject_meta
 
 
 def save_processed(save_dir: str | Path,
                    X: np.ndarray, y: np.ndarray,
-                   subjects: np.ndarray, origins: np.ndarray):
+                   subjects: np.ndarray, origins: np.ndarray,
+                   subject_meta: Optional[Dict[str, dict]] = None):
     """Save homogenized dataset to disk as numpy arrays."""
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
@@ -301,6 +373,9 @@ def save_processed(save_dir: str | Path,
     np.save(save_dir / "y.npy",        y)
     np.save(save_dir / "subjects.npy", subjects)
     np.save(save_dir / "origins.npy",  origins)
+    if subject_meta is not None:
+        with open(save_dir / "subject_meta.json", "w", encoding="utf-8") as fh:
+            json.dump(subject_meta, fh, indent=2, ensure_ascii=False)
     print(f"Saved {len(X)} windows to {save_dir}")
 
 

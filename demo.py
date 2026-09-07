@@ -13,7 +13,7 @@ import sys, numpy as np, torch
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.data.homogenization    import load_processed, UNIFIED_LABELS
+from src.data.homogenization    import load_processed, load_subject_meta, resolve_subject, UNIFIED_LABELS
 from src.data.har_dataset       import HARDataset
 from src.models.har_model       import build_model
 from src.data.anticipation_dataset import AnticipationDataset
@@ -33,6 +33,7 @@ def banner(text):
 def load():
     print("Loading data and model...")
     X, y, subjects, origins = load_processed("data/processed")
+    subject_meta = load_subject_meta("data/processed")
     ds = HARDataset(X, y, subjects, origins)
 
     n_classes = int(y.max()) + 1
@@ -48,7 +49,7 @@ def load():
     model.eval()
     print(f"  Dataset : {len(ds):,} windows | {len(np.unique(subjects))} subjects")
     print(f"  Model   : {sum(p.numel() for p in model.parameters()):,} parameters\n")
-    return ds, model, X, y, subjects, origins
+    return ds, model, X, y, subjects, origins, subject_meta
 
 
 # ── DEMO 1: Activity Recognition ─────────────────────────────────────────────
@@ -94,12 +95,19 @@ def demo_recognition(ds, model, X, y):
 
 
 # ── DEMO 2: Continual Learning — new user adaptation ─────────────────────────
-def demo_continual(ds, model, X, y, subjects):
+def demo_continual(ds, model, X, y, subjects, subject_meta):
     banner("DEMO 2 — Continual Learning (new user adaptation)")
 
-    # First: init prototypes from a base set of subjects (1–4)
-    print("Step 1: initialize model on subjects 1–4 (existing users)...")
-    base_mask = np.isin(subjects, [1, 2, 3, 4])
+    hapt_base = sorted(
+        int(gid) for gid, info in subject_meta.items()
+        if info.get("dataset") == "hapt"
+    )[:4]
+    new_user = resolve_subject(subject_meta, "wisdm", 5)
+    if new_user is None:
+        new_user = int(sorted(np.unique(subjects))[-1])
+
+    print(f"Step 1: initialize model on HAPT users {hapt_base} (existing users)...")
+    base_mask = np.isin(subjects, hapt_base)
     X_base = torch.from_numpy(X[base_mask][:500])
     y_base = torch.from_numpy(y[base_mask][:500])
     model.eval()
@@ -108,8 +116,7 @@ def demo_continual(ds, model, X, y, subjects):
         model.har_head.prototype_memory.update(emb_base, y_base)
     print(f"  Prototypes for {model.har_head.prototype_memory.n_classes()} classes initialised\n")
 
-    # Pick subject 5 as the "new user"
-    new_user = 5
+    # Pick wisdm-5 as the "new user" (Karim in the soutenance demo)
     mask = subjects == new_user
     X_new, y_new = X[mask], y[mask]
 
@@ -197,10 +204,10 @@ def main():
     print(f"\n{BOLD}HAR Continual Learning — Interactive Demo{RESET}")
     print("Adaptive and Continual Learning for Human Activity Recognition\n")
 
-    ds, model, X, y, subjects, origins = load()
+    ds, model, X, y, subjects, origins, subject_meta = load()
 
     demo_recognition(ds, model, X, y)
-    demo_continual(ds, model, X, y, subjects)
+    demo_continual(ds, model, X, y, subjects, subject_meta)
     demo_anticipation(model, X, y, subjects)
 
     banner("Summary")

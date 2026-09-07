@@ -35,7 +35,7 @@ def main():
         sys.exit(1)
 
     print(f"Building unified dataset from: {data_root}")
-    X, y, subjects, origins, stats = build_unified_dataset(
+    X, y, subjects, origins, stats, subject_meta = build_unified_dataset(
         data_root=data_root,
         datasets=args.datasets,
         discard_unknown=True,
@@ -44,11 +44,12 @@ def main():
 
     print(f"\nTotal windows: {len(X)}")
     print(f"X shape: {X.shape}")
+    print(f"Unique global subjects: {len(subject_meta)}")
 
     ds = dataset_from_arrays(X, y, subjects, origins)
     print("\n" + ds.summary())
 
-    save_processed(args.out, X, y, subjects, origins)
+    save_processed(args.out, X, y, subjects, origins, subject_meta=subject_meta)
     print(f"\nDone. Files saved to: {args.out}")
 
 

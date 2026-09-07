@@ -98,6 +98,9 @@ python scripts/train.py --mode continual --scenario user --data data/processed \
 # 6. Continual learning (class-incremental, 6 classes/task recommended)
 python scripts/train.py --mode continual --scenario class --data data/processed \
        --classes_per_task 6
+
+# 7. Démo PFE (interface graphique Streamlit)
+streamlit run app_streamlit.py
 ```
 
 ---

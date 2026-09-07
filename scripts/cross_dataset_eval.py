@@ -130,9 +130,18 @@ def main():
               f"  [sans adaptation]")
 
         # ── Few-shot domain adaptation on PAMAP2 ──────────────────────
-        print(f"\nAdaptation few-shot PAMAP2 ({args.n_adapt} fenêtres)...")
+        # Balanced per-class draw: macro-F1 weighs every class equally, so a
+        # uniform-random few-shot draw (which mirrors PAMAP2's own class
+        # imbalance) starves rare classes and hurts macro-F1 disproportionately.
+        print(f"\nAdaptation few-shot PAMAP2 ({args.n_adapt} fenêtres, équilibré par classe)...")
         rng = np.random.default_rng(args.seed)
-        adapt_idx = rng.choice(len(X_p), min(args.n_adapt, len(X_p)), replace=False)
+        n_per_class = args.n_adapt // len(common_p)
+        adapt_idx_parts = []
+        for c in sorted(common_p):
+            c_idx = np.where(y_p == c)[0]
+            take  = min(n_per_class, len(c_idx))
+            adapt_idx_parts.append(rng.choice(c_idx, take, replace=False))
+        adapt_idx = np.concatenate(adapt_idx_parts)
         test_idx  = np.setdiff1d(np.arange(len(X_p)), adapt_idx)
 
         adapter = DomainAdapter(d_model=model.backbone.d_model)

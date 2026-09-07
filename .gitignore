@@ -1,6 +1,7 @@
 # Data — never commit raw or processed sensor data
 data/raw/
 data/processed/
+data/processed_all/
 
 # Model checkpoints
 checkpoints/
