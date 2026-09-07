@@ -81,13 +81,13 @@ Objectif 2 : Apprentissage continu robuste. Développer un mécanisme de gestion
 
 Objectif 3 : Anticipation temps réel. Proposer un module d'anticipation opérationnel en temps réel, capable de détecter les transitions imminentes d'activité avec une précision et un rappel suffisants pour des applications de sécurité (détection de chute imminente, surveillance de personnes âgées).
 
-Objectif 4 : Adaptation cross-dataset. Évaluer la capacité du système à se transférer d'un dataset source à un dataset cible de distribution différente, avec et sans annotations cibles, via l'alignement de covariance CORAL.
+Objectif 4 : Adaptation cross-dataset. Évaluer la capacité du système à se transférer d'un dataset source à un dataset cible de distribution différente, avec et sans annotations cibles, via un adaptateur affine few-shot (\texttt{DomainAdapter}).
 
 Objectif 5 : Détection de chutes hybride. Intégrer un module complémentaire de détection de chutes combinant règles physiques et classification apprise, démontrant la généricité de l'architecture proposée.
 
 Les contributions scientifiques et techniques originales de ce travail sont :
 
-(C1) Uncertainty-Weighted Replay (UWR) : stratégie de sélection et d'échantillonnage d'exemples dans le tampon de rejeu basée sur l'incertitude épistémique estimée par Monte Carlo Dropout. À notre connaissance, c'est la première application de cette stratégie au contexte HAR continu.
+(C1) Uncertainty-Weighted Replay (UWR) : stratégie de sélection et d'échantillonnage d'exemples dans le tampon de rejeu basée sur l'entropie de la prédiction softmax (une passe, paramètre $\alpha$). À notre connaissance, c'est la première application de cette stratégie au contexte HAR continu.
 
 (C2) Module d'anticipation multi-classe sur fenêtres partielles : tête LSTM
 entraînée sur le backbone gelé, contexte $S=5$ fenêtres tronquées à
@@ -96,7 +96,7 @@ cross-entropie.
 
 (C3) Évaluation multi-dataset de l'apprentissage continu : protocole d'évaluation rigoureux couvrant deux scénarios, plusieurs baselines, et une mesure explicite de l'oubli (BWT) et du transfert (FWT).
 
-(C4) Adaptation CORAL avec backbone pré-entraîné : démonstration que l'alignement de covariance supervisé sur les embeddings d'un Transformer pré-entraîné produit un gain de ×15 par rapport à l'absence d'adaptation.
+(C4) Adaptation de domaine (\texttt{DomainAdapter}) : transformation affine few-shot sur embeddings d'un Transformer pré-entraîné (backbone gelé), pour réduire le domain shift cross-dataset (WISDM / PAMAP2).
 
 \section{Données : homogénéisation et pipeline}
 
@@ -234,17 +234,14 @@ Motivation et intuition
 
 La stratégie de rejeu uniforme présente une limitation fondamentale : elle ne distingue pas les exemples faciles (bien classifiés, loin des frontières de décision) des exemples difficiles (près des frontières, source d'erreurs). Or, les frontières de décision sont précisément les régions de l'espace de représentation qui risquent de se déplacer lors de l'apprentissage de nouvelles tâches, causant ainsi l'oubli. En concentrant la mémoire sur les exemples à forte incertitude, l'UWR maximise la couverture des frontières de décision avec un budget mémoire fixe.
 
-Estimation de l'incertitude épistémique par Monte Carlo Dropout
+Estimation de l'incertitude par entropie de prédiction
 
-L'incertitude épistémique d'un exemple $x$ est estimée par la méthode de Monte Carlo Dropout \parencite{gal2016}. Le modèle est mis en mode entraînement (dropout actif) et $T_{\mathrm{MC}} = 20$ passages forward sont effectués sur $x$, produisant $T_{\mathrm{MC}}$ distributions softmax stochastiques $\{p_\tau(y \mid x)\}_{\tau=1}^{T_{\mathrm{MC}}}$. La distribution moyenne est calculée :
+Dans l'implémentation livrée (\texttt{uncertainty\_replay.py}), l'incertitude d'un exemple $x$ est l'entropie de Shannon de la distribution softmax \emph{en une seule passe} (mode \texttt{eval}) :
 
-$$\bar{p}(y \mid x) = \frac{1}{T_{MC}} \sum_{\tau=1}^{T_{MC}} p_\tau(y \mid x)$$
+$$p(y \mid x) = \mathrm{softmax}(f_\theta(x)), \qquad
+\mathcal{U}(x) = -\sum_{c=1}^{|\mathcal{Y}|} p(c \mid x) \log p(c \mid x).$$
 
-L'incertitude épistémique est mesurée par l'entropie de Shannon de cette distribution moyenne :
-
-$$\mathcal{U}(x) = -\sum_{c=1}^{|\mathcal{Y}|} \bar{p}(c \mid x) \log \bar{p}(c \mid x)$$
-
-Cette mesure atteint son maximum $\log |\mathcal{Y}|$ lorsque toutes les classes sont équiprobables (incertitude maximale) et vaut 0 lorsqu'une classe est prédite avec certitude absolue.
+Les scores sont ensuite élevés à la puissance $\alpha$ (défaut $\alpha=1$) et normalisés pour former une distribution d'échantillonnage. Cette mesure est moins coûteuse que le Monte Carlo Dropout \parencite{gal2016} ($T$ passes) : nous citons Gal \& Ghahramani comme fondement théorique de l'incertitude, mais le code priorise l'entropie predictive single-pass, recalculée périodiquement sur le tampon (\texttt{update\_freq}).
 
 Algorithme UWR
 
@@ -413,12 +410,12 @@ par classe ; la taille (2\,000 vs 5\,000) conditionne directement le forgetting
 (22~\% de réduction observée). Les transitions posturales HAPT modélisent ce
 déséquilibre extrême entre classes massives et classes rares.
 
-\subsection{Cas 3 — Déploiement cross-appareil (CORAL + anticipation)}
+\subsection{Cas 3 — Déploiement cross-appareil (DomainAdapter + anticipation)}
 
 Un patient quitte l'hôpital (capteur ceinture, protocole HAPT-like) et continue
-le suivi à domicile avec son téléphone en poche (distribution WISDM-like). CORAL
-supervisé sur 20~\% de sessions étiquetées à domicile aligne les embeddings avant
-fine-tuning léger. En parallèle, le module d'anticipation LSTM peut signaler
+le suivi à domicile avec son téléphone en poche (distribution WISDM-like). Un
+\texttt{DomainAdapter} few-shot sur quelques fenêtres étiquetées à domicile
+calibre les embeddings avant inférence. En parallèle, le module d'anticipation LSTM peut signaler
 une activité suivante probable lorsque le contexte partiel suggère une
 transition ; le détecteur hybride de chutes fusionne règles physiques et MLP.
 Ce scénario combine adaptation domaine, CL utilisateur si le patient est suivi
@@ -430,8 +427,7 @@ Dans les trois cas, une fenêtre de 3~s doit idéalement être inférée en moin
 150~ms sur CPU (\emph{objectif} de conception rappelé au §4.2, non mesuré comme
 benchmark dans nos expériences). Le backbone $\approx$531~K paramètres et la
 tête d'anticipation légère sont dimensionnés pour rester compatibles avec cette
-cible ; MC Dropout ($T=20$) est réservé à l'entraînement et à la mise à jour du
-tampon, pas à chaque inférence utilisateur en production.
+cible ; le recalcul d'entropie UWR est périodique (\texttt{update\_freq}), pas à chaque inférence utilisateur en production.
 
 \section{Protocole d'évaluation}
 
@@ -532,7 +528,7 @@ Ce chapitre a présenté la conception du système HAR adaptatif et continu.
 L'architecture à backbone Transformer partagé mutualise les représentations
 entre la reconnaissance continue (UWR + prototypes) et l'anticipation
 multi-classe (LSTM sur fenêtres partielles). UWR exploite l'incertitude
-épistémique (MC Dropout) pour guider le tampon de rejeu. L'anticipation
+(entropie softmax) pour guider le tampon de rejeu. L'anticipation
 multi-classe atteint un macro-F1 d'environ 0,60--0,64. Les modules SSL,
 foundation-style, calibration online, bandit de seuil et fall-risk alignent
 la conception sur la fiche PFE.

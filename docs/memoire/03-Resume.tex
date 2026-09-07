@@ -23,11 +23,10 @@ d'observation (baseline majorité $\approx$ 0,04) ; le fall-risk binaire atteint
 environ 0,88.
 
 Le système \texttt{har\_project} comprend plus de 531\,000 paramètres pour le
-backbone, un tampon de rejeu de 2\,000 fenêtres, et des modules CORAL, SSL,
+backbone, un tampon de rejeu de 2\,000 fenêtres, et des modules d'adaptation de domaine, SSL,
 calibration et chutes. Les expériences couvrent le pré-entraînement (91,3~\%
 accuracy HAPT), l'adaptation 44 sujets (F1 0,543), le class-incrémental six
-tâches, l'anticipation LSTM, le fall-risk, et l'adaptation cross-dataset CORAL
-(F1 0,629). Le scénario « préparation de repas » reste hors portée faute de
+tâches, l'anticipation LSTM, le fall-risk, et l'transfert cross-dataset (HAPT$\rightarrow$WISDM F1 $\approx$0,46). Le scénario « préparation de repas » reste hors portée faute de
 corpus cuisine. Les annexes documentent datasets, hyperparamètres, code et
 fiches bibliographiques pour faciliter la reproduction et la poursuite en thèse
 ou publication.

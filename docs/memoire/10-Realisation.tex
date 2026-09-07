@@ -49,18 +49,16 @@ har_project/
 |   |-- data/
 |   |   |-- preprocessing.py       # pipeline pretraitement
 |   |   |-- har_dataset.py         # Dataset PyTorch
-|   |   |-- augmentation.py        # augmentation en ligne
 |   |   `-- anticipation_dataset.py
 |   |-- models/
 |   |   |-- backbone.py            # IMUTransformerEncoder
 |   |   |-- har_model.py           # modele complet deux tetes
 |   |   |-- replay_buffer.py       # tampon de rejeu standard
-|   |   |-- uncertainty_replay.py  # UWR
-|   |   |-- mc_dropout.py          # Monte Carlo Dropout
+|   |   |-- uncertainty_replay.py  # UWR (entropie softmax)
 |   |   |-- prototype_memory.py    # memoire de prototypes
 |   |   |-- fall_risk.py           # fall-risk + heuristique physique
-|   |   |-- online_calibration.py  # temperature + seuil adaptatif
-|   |   `-- domain_adapter.py      # CORAL
+|   |   |-- online_calibration.py  # temperature + seuil
+|   |   `-- domain_adapter.py      # DomainAdapter (affine few-shot)
 |   |-- training/
 |   |   |-- trainer.py             # boucle pre-entrainement
 |   |   |-- anticipation_trainer.py
@@ -77,7 +75,7 @@ har_project/
 `-- docs/                          # memoire LaTeX
 \end{lstlisting}
 
-Le suivi de version est géré par Git. Chaque composant fonctionnel (backbone, UWR, CORAL, anticipation) fait l'objet d'une implémentation et d'une validation indépendantes avant intégration dans le modèle complet.
+Le suivi de version est géré par Git. Chaque composant fonctionnel (backbone, UWR, DomainAdapter, anticipation) fait l'objet d'une implémentation et d'une validation indépendantes avant intégration dans le modèle complet.
 
 \section{Préparation des données}
 
@@ -142,7 +140,7 @@ l'ordre des classes sous graine fixe (\texttt{seed=42}).
 Dataset. La classe \texttt{HARDataset} encapsule les tableaux NumPy
 $(X, y, \mathrm{subjects}, \mathrm{origins})$. L'augmentation n'est pas un
 flag du Dataset : elle est appliquée dans la boucle d'entraînement / module
-\texttt{augmentation.py} lorsque le script l'active.
+les scripts d'entraînement / SSL (\texttt{imu\_augment} dans \texttt{ssl\_pretrain.py}) lorsque l'augmentation est activée.
 
 \section{Implémentation du backbone Transformer}
 
@@ -193,7 +191,7 @@ Perte. Cross-entropie standard sur les 12 classes HAPT, sans pondération de cla
 
 Split train/validation. 80 \% des sujets pour l'entraînement (24 sujets), 20 \% pour la validation (6 sujets), avec séparation stricte par sujet pour éviter la fuite de données inter-sujets.
 
-Augmentation. Lors du pré-entraînement, l'IMUAugmenter est activé avec probabilité $p_{\mathrm{apply}} = 0{,}5$ par transformation : bruit gaussien ($\sigma = 0{,}01$), mise à l'échelle ($s \in [0{,}85, 1{,}15]$), déformation temporelle ($\sigma_{\mathrm{warp}} = 0{,}05$), dropout de canaux ($p_{\mathrm{drop}} = 0{,}1$), et découpage de fenêtre ($r_{\mathrm{crop}} = 0{,}9$). L'augmentation permet d'améliorer l'accuracy de validation de 81~\% (sans) à 91,3~\% (avec), soit un gain de +10 points.
+Augmentation. Lors du pré-entraînement, l'augmentation de fenêtres IMU est activée avec probabilité $p_{\mathrm{apply}} = 0{,}5$ par transformation : bruit gaussien ($\sigma = 0{,}01$), mise à l'échelle ($s \in [0{,}85, 1{,}15]$), déformation temporelle ($\sigma_{\mathrm{warp}} = 0{,}05$), dropout de canaux ($p_{\mathrm{drop}} = 0{,}1$), et découpage de fenêtre ($r_{\mathrm{crop}} = 0{,}9$). L'augmentation permet d'améliorer l'accuracy de validation de 81~\% (sans) à 91,3~\% (avec), soit un gain de +10 points.
 
 \begin{figure}[H]
   \centering
@@ -282,25 +280,25 @@ def sample_uncertain(self, model, batch_size, device):
 
 Le paramètre alpha contrôle la force de la priorisation : $\alpha = 1{,}0$ correspond à un échantillonnage purement proportionnel aux incertitudes, tandis que $\alpha \to 0$ converge vers l'échantillonnage uniforme.
 
-\subsection{Intégration du Monte Carlo Dropout}
+\subsection{Calcul d'incertitude UWR (entropie softmax)}
 
-Le Monte Carlo Dropout est implémenté dans src/models/mc\_dropout.py. La fonction add\_dropout\_to\_backbone(backbone, p=0.1) ajoute un module nn.Dropout supplémentaire au sein de chaque bloc Transformer, de manière non-destructive. Cette approche évite de modifier l'architecture du backbone déjà pré-entraîné.
+Le module \texttt{UncertaintyWeightedReplayBuffer} (\texttt{src/models/uncertainty\_replay.py}) calcule l'entropie sur le tampon en mode \texttt{eval} (une passe forward), puis échantillonne avec $P(x)\propto \mathcal{U}(x)^{\alpha}$.
 
-\begin{lstlisting}[language=Python,caption={Estimation d'incertitude par MC Dropout},label=lst:mc_dropout]
-def mc_uncertainty(model, x, n_passes=20):
-    model.train()  # active le dropout
-    probs_list = []
-    with torch.no_grad():
-        for _ in range(n_passes):
-            logits = model(x)
-            probs_list.append(torch.softmax(logits, dim=-1))
-    mean_probs = torch.stack(probs_list).mean(dim=0)
-    entropy = -(mean_probs * torch.log(mean_probs + 1e-8)).sum(dim=-1)
+\begin{lstlisting}[language=Python,caption={Entropie de prédiction pour UWR},label=lst:uwr_entropy]
+@torch.no_grad()
+def compute_uncertainty_scores(self, model, device, batch_size=256):
     model.eval()
-    return entropy  # (B,)
+    entropies = []
+    for start in range(0, len(self._X), batch_size):
+        batch = torch.from_numpy(self._X[start:start+batch_size]).to(device)
+        probs = F.softmax(model(batch), dim=-1)
+        H = -(probs * (probs + 1e-10).log()).sum(dim=-1)
+        entropies.append(H.cpu().numpy())
+    scores = np.concatenate(entropies) ** self.alpha
+    return scores / scores.sum()
 \end{lstlisting}
 
-La classe MCDropoutReplayBuffer encapsule un ReplayBuffer standard et un mécanisme d'appel à mc\_uncertainty lors de l'ajout de nouveaux exemples. Pour limiter le surcoût computationnel, l'estimation d'incertitude n'est effectuée que pour les exemples candidats à l'insertion, pas pour l'intégralité du tampon.
+Il n'existe pas de fichier \texttt{mc\_dropout.py} dans le dépôt livré : le MC Dropout reste une référence bibliographique, pas l'implémentation utilisée pour pondérer le rejeu.
 
 \subsection{Entraînement incrémental complet}
 
@@ -466,75 +464,51 @@ Le scénario « préparation de repas » reste hors portée faute de corpus cuis
 Streamlit expose six scénarios (reconnaissance, nouvel utilisateur,
 anticipation, fall-risk, calibration+RL, SSL/foundation).
 
-\subsection{Adaptateur de domaine CORAL}
+\subsection{Adaptateur de domaine (\texttt{DomainAdapter})}
 
-L'adaptation de domaine est implémentée dans src/models/domain\_adapter.py via la classe CORALAdapter. CORAL (CORrelation ALignment, Sun \& Saenko, 2016) aligne les statistiques de second ordre (matrices de covariance) entre les embeddings source et cible pour réduire le domain shift.
+L'adaptation de domaine livrée est dans \texttt{src/models/domain\_adapter.py} :
+une transformation affine légère $x' = x \odot s + b$ (\texttt{DomainAdapter})
+entraînée en few-shot pendant que le backbone reste gelé
+(\texttt{adapt\_domain}), contre l'objectif plus proche prototype (même règle
+qu'à l'inférence). Le script \texttt{cross\_dataset\_eval.py} mesure le
+domain shift et applique cet adaptateur surtout sur PAMAP2 ($n$ fenêtres
+cibles étiquetées).
 
-Calcul de la perte CORAL. La perte CORAL est définie comme la distance de Frobenius entre les matrices de covariance source $C_s$ et cible $C_t$ :
-
-$$\mathcal{L}_{CORAL} = \frac{1}{4d^2} |C_s - C_t|_F^2$$
-
-où $d = 128$ est la dimension des embeddings. La fonction coral\_loss(source\_features, target\_features) est implémentée comme suit :
-
-def coral\_loss(source, target):
-
-d = source.size(1)
-
-\# Centrer les features
-
-source = source - source.mean(dim=0)
-
-target = target - target.mean(dim=0)
-
-\# Matrices de covariance
-
-ns, nt = source.size(0), target.size(0)
-
-Cs = (source.T @ source) / (ns - 1)
-
-Ct = (target.T @ target) / (nt - 1)
-
-\# Distance de Frobenius normalisée
-
-loss = torch.norm(Cs - Ct, p='fro') ** 2 / (4 * d * d)
-
-return loss
-
-CORAL non supervisé. Sans étiquettes cibles, seul l'alignement de covariance est appliqué. Le modèle source est fine-tuné sur les données cibles en minimisant $\mathcal{L}_{CORAL}$ seul, sans supervision. Les paramètres du backbone sont légèrement ajustés (lr = $10^{-5}$) tandis que la tête de classification reste gelée.
-
-CORAL supervisé. Avec 20 \% des étiquettes cibles disponibles, la perte totale combine l'alignement de covariance et la supervision par cross-entropie :
-
-$$\mathcal{L}_{\mathrm{total}} = \mathcal{L}_{\mathrm{CE}}(x_{\mathrm{cible, labeled}}) + \lambda_{\mathrm{CORAL}} \cdot \mathcal{L}_{\mathrm{CORAL}}(x_{\mathrm{source}}, x_{\mathrm{cible}})$$
-
-avec $\lambda_{CORAL} = 1{,}0$. Le fine-tuning est effectué sur 20 epochs avec le backbone pré-entraîné sur HAPT.
+CORAL \parencite{sun2016} (alignement de covariance) reste une référence
+bibliographique pertinente, mais \emph{n'est pas} la fonction de perte
+exécutée dans le dépôt actuel : il n'existe pas de \texttt{coral\_loss} ni de
+classe \texttt{CORALAdapter} dans le code.
 
 \begin{table}[H]
 \centering
 \small
-\begin{tabularx}{0.72\textwidth}{|Y|c|}
+\begin{tabularx}{0.88\textwidth}{|Y|c|}
 \hline
-\textbf{Configuration CORAL} & \textbf{F1 macro} \\
+\textbf{Transfert (checkpoint \texttt{cross\_dataset\_results.npy})} & \textbf{Macro-F1} \\
 \hline
-Sans adaptation & 0,040 \\
-CORAL non supervisé & 0,040 (+0,8~\%) \\
-CORAL supervisé (20~\% labels) & \textbf{0,629 ($\times 15$)} \\
+HAPT $\rightarrow$ HAPT (référence intra) & 0,838 \\
+HAPT $\rightarrow$ WISDM (zéro-shot) & 0,464 \\
+HAPT $\rightarrow$ PAMAP2 (zéro-shot) & 0,124 \\
 \hline
 \end{tabularx}
-\caption{Résultats adaptation HAPT $\rightarrow$ WISDM}
+\caption{Transfert cross-dataset mesuré (sans réécrire le backbone)}
 \label{tab:coral_impl}
 \end{table}
 
-Le gain spectaculaire du CORAL supervisé (+×15 par rapport à l'absence d'adaptation) s'explique par l'effet synergique de l'alignement de covariance et des quelques exemples étiquetés : l'alignement crée une représentation commune source-cible, puis la supervision affine la tête de classification dans cet espace aligné.
+Ces chiffres confirment un fort domain shift (surtout PAMAP2). L'adaptateur
+affine few-shot vise à récupérer une partie de ce gap sans réentraînement
+complet ; les anciens tableaux « CORAL 0,629 / $\times 15$ » ne correspondent
+pas au code livré et ne sont plus rapportés comme résultat reproductible.
 
 \section{Conclusion}
 
 Ce chapitre a présenté les choix d'implémentation pour concrétiser l'architecture
 du Chapitre~4. Chaque composant — backbone Transformer, tampon UWR, module
-d'anticipation LSTM, fall-risk, SSL/foundation-style, calibration+RL, adaptateur
-CORAL — est un module Python indépendant intégré dans \texttt{HARContinualModel}.
-Les expériences valident l'augmentation de données, l'UWR et CORAL ;
-l'anticipation multi-classe atteint $\approx$0,60--0,64 de macro-F1. Le chapitre
-suivant présente l'évaluation systématique.
+d'anticipation LSTM, fall-risk, SSL/foundation-style, calibration+RL,
+\texttt{DomainAdapter} — est un module Python indépendant. Les expériences
+valident l'UWR et le transfert cross-dataset ; l'anticipation multi-classe
+atteint $\approx$0,60--0,64 de macro-F1. Le chapitre suivant présente
+l'évaluation systématique.
 
 \subsection{Retour d'expérience implémentation}
 

@@ -398,12 +398,12 @@ atteint un macro-F1 de validation d'environ 0,60--0,64 (baseline majorité
 $\approx$ 0,04) ; le fall-risk binaire atteint environ 0,88.
 
 Le système \texttt{har\_project} comprend plus de 531\,000 paramètres pour le
-backbone, un tampon de rejeu de 2\,000 fenêtres, et des modules CORAL, SSL,
+backbone, un tampon de rejeu de 2\,000 fenêtres, et des modules d'adaptation de domaine, SSL,
 calibration, fall-risk et bandit de seuil. Les expériences couvrent le
 pré-entraînement (91,3~\% accuracy HAPT), l'adaptation 44 sujets (F1 0,543),
 le class-incrémental six tâches, l'anticipation LSTM (macro-F1 $\approx$0,60--0,64),
-le fall-risk binaire ($\approx$0,88), et l'adaptation cross-dataset CORAL
-(F1 0,629). Le scénario « préparation de repas » reste hors portée faute de
+le fall-risk binaire ($\approx$0,88), et l'adaptation cross-dataset (\texttt{DomainAdapter})
+(F1 0,46). Le scénario « préparation de repas » reste hors portée faute de
 corpus cuisine. Les annexes documentent datasets, hyperparamètres, code et
 fiches bibliographiques pour faciliter la reproduction.
 
@@ -729,7 +729,7 @@ de façon continue quand de nouveaux utilisateurs ou classes arrivent, et (2)
 détecte tôt les changements d'activité. L'implémentation s'appuie sur le projet
 \texttt{har\_project} : backbone Transformer, tampon de rejeu guidé par
 l'incertitude (UWR), anticipation multi-classe de l'activité suivante via une
-tête LSTM sur fenêtres partielles, plus des modules CORAL, SSL,
+tête LSTM sur fenêtres partielles, plus des modules d'adaptation de domaine, SSL,
 foundation-style, calibration, bandit de seuil et fall-risk.
 
 \textbf{Partie I} (chapitres 1 à 3) pose le contexte : fondements HAR, concepts
@@ -783,7 +783,7 @@ Le système \texttt{HARContinualModel} s'organise en trois couches :
   \item \textbf{Module CL (UWR)} : tampon pondéré par entropie MC, prototypes par
   classe, perte contrastive ; scénarios user- et class-incremental.
   \item \textbf{Modules auxiliaires} : tête anticipation LSTM multi-classe,
-  adaptateur CORAL, fall-risk, calibration online, bandit de seuil,
+  adaptateur de domaine (\texttt{DomainAdapter}), fall-risk, calibration online, bandit de seuil,
   SSL / foundation-style.
 \end{enumerate}
 
@@ -1443,14 +1443,14 @@ Le lien avec l'apprentissage par renforcement reste surtout conceptuel pour le
 HAR batch sur IMU ; les modèles séquentiels supervisés restent la voie la plus
 fréquente dans la littérature capteur.
 
-\subsection{Incertitude et Monte Carlo Dropout}
+\subsection{Incertitude : MC Dropout (théorie) vs entropie (implémentation)}
 
 Pour prioriser les exemples difficiles en replay (UWR, chapitre~4), nous
-estimons l'incertitude épistémique par Monte Carlo Dropout
-\parencite{gal2016} : plusieurs passes forward avec dropout actif, puis entropie
-de la distribution moyenne des probabilités. Gal et Ghahramani distinguent
-incertitude épistémique (modèle) et aléatoire (données) ; seule la première
-nous intéresse pour guider la mémoire sous contrainte embarquée.
+Gal et Ghahramani \parencite{gal2016} proposent le Monte Carlo Dropout pour
+estimer l'incertitude épistémique. Dans \texttt{har\_project}, l'UWR utilise
+une approximation plus légère : entropie de la softmax en une passe
+(\texttt{uncertainty\_replay.py}), recalculée périodiquement sur le tampon.
+Le MC Dropout reste la référence conceptuelle, pas le mécanisme exécuté.
 
 \section{Métriques d'évaluation}
 
@@ -1696,7 +1696,7 @@ modérés (0,24--0,28). Le finetuning naïf s'effondre en quelques tâches — p
 directe de l'oubli en HAR.
 
 Notre UWR reprend l'esprit du rehearsal mais ajoute des prototypes par classe,
-une perte contrastive et un score d'incertitude (MC Dropout) pour pondérer les
+une perte contrastive et un score d'incertitude (entropie softmax) pour pondérer les
 mises à jour. OCL-HAR ne traite pas l'anticipation ; leurs métriques restent
 notre référence pour comparer forgetting et F1 macro en conditions multi-jeux.
 
@@ -2213,13 +2213,13 @@ Objectif 2 : Apprentissage continu robuste. Développer un mécanisme de gestion
 
 Objectif 3 : Anticipation temps réel. Proposer un module d'anticipation opérationnel en temps réel, capable de détecter les transitions imminentes d'activité avec une précision et un rappel suffisants pour des applications de sécurité (détection de chute imminente, surveillance de personnes âgées).
 
-Objectif 4 : Adaptation cross-dataset. Évaluer la capacité du système à se transférer d'un dataset source à un dataset cible de distribution différente, avec et sans annotations cibles, via l'alignement de covariance CORAL.
+Objectif 4 : Adaptation cross-dataset. Évaluer la capacité du système à se transférer d'un dataset source à un dataset cible de distribution différente, avec et sans annotations cibles, via un adaptateur affine few-shot (\texttt{DomainAdapter}).
 
 Objectif 5 : Détection de chutes hybride. Intégrer un module complémentaire de détection de chutes combinant règles physiques et classification apprise, démontrant la généricité de l'architecture proposée.
 
 Les contributions scientifiques et techniques originales de ce travail sont :
 
-(C1) Uncertainty-Weighted Replay (UWR) : stratégie de sélection et d'échantillonnage d'exemples dans le tampon de rejeu basée sur l'incertitude épistémique estimée par Monte Carlo Dropout. À notre connaissance, c'est la première application de cette stratégie au contexte HAR continu.
+(C1) Uncertainty-Weighted Replay (UWR) : stratégie de sélection et d'échantillonnage d'exemples dans le tampon de rejeu basée sur l'entropie de la prédiction softmax (une passe, paramètre $\alpha$). À notre connaissance, c'est la première application de cette stratégie au contexte HAR continu.
 
 (C2) Module d'anticipation multi-classe sur fenêtres partielles : tête LSTM
 entraînée sur le backbone gelé, contexte $S=5$ fenêtres tronquées à
@@ -2228,7 +2228,7 @@ cross-entropie.
 
 (C3) Évaluation multi-dataset de l'apprentissage continu : protocole d'évaluation rigoureux couvrant deux scénarios, plusieurs baselines, et une mesure explicite de l'oubli (BWT) et du transfert (FWT).
 
-(C4) Adaptation CORAL avec backbone pré-entraîné : démonstration que l'alignement de covariance supervisé sur les embeddings d'un Transformer pré-entraîné produit un gain de ×15 par rapport à l'absence d'adaptation.
+(C4) Adaptation de domaine (\texttt{DomainAdapter}) : transformation affine few-shot sur embeddings d'un Transformer pré-entraîné (backbone gelé), pour réduire le domain shift cross-dataset (WISDM / PAMAP2).
 
 \section{Données : homogénéisation et pipeline}
 
@@ -2308,7 +2308,7 @@ Le flux de traitement global est le suivant : une fenêtre IMU brute $(T=150, C=
   \node[mod, below=0.65cm of bb,xshift=-1.6cm] (cl) {Module 1\\HAR + UWR};
   \node[mod, below=0.65cm of bb,xshift=1.6cm] (ant) {Module 2\\Anticipation};
   \node[mod, below=0.55cm of cl] (fall) {Chutes\\hybride};
-  \node[mod, below=0.55cm of ant] (coral) {Adaptateur\\CORAL};
+  \node[mod, below=0.55cm of ant] (coral) {Domain\\Adapter};
   \draw[arr] (imu) -- (prep);
   \draw[arr] (prep) -- (bb);
   \draw[arr] (bb) -- (cl);
@@ -2403,17 +2403,14 @@ Motivation et intuition
 
 La stratégie de rejeu uniforme présente une limitation fondamentale : elle ne distingue pas les exemples faciles (bien classifiés, loin des frontières de décision) des exemples difficiles (près des frontières, source d'erreurs). Or, les frontières de décision sont précisément les régions de l'espace de représentation qui risquent de se déplacer lors de l'apprentissage de nouvelles tâches, causant ainsi l'oubli. En concentrant la mémoire sur les exemples à forte incertitude, l'UWR maximise la couverture des frontières de décision avec un budget mémoire fixe.
 
-Estimation de l'incertitude épistémique par Monte Carlo Dropout
+Estimation de l'incertitude par entropie de prédiction
 
-L'incertitude épistémique d'un exemple $x$ est estimée par la méthode de Monte Carlo Dropout \parencite{gal2016}. Le modèle est mis en mode entraînement (dropout actif) et $T_{\mathrm{MC}} = 20$ passages forward sont effectués sur $x$, produisant $T_{\mathrm{MC}}$ distributions softmax stochastiques $\{p_\tau(y \mid x)\}_{\tau=1}^{T_{\mathrm{MC}}}$. La distribution moyenne est calculée :
+Dans l'implémentation livrée (\texttt{uncertainty\_replay.py}), l'incertitude d'un exemple $x$ est l'entropie de Shannon de la distribution softmax \emph{en une seule passe} (mode \texttt{eval}) :
 
-$$\bar{p}(y \mid x) = \frac{1}{T_{MC}} \sum_{\tau=1}^{T_{MC}} p_\tau(y \mid x)$$
+$$p(y \mid x) = \mathrm{softmax}(f_\theta(x)), \qquad
+\mathcal{U}(x) = -\sum_{c=1}^{|\mathcal{Y}|} p(c \mid x) \log p(c \mid x).$$
 
-L'incertitude épistémique est mesurée par l'entropie de Shannon de cette distribution moyenne :
-
-$$\mathcal{U}(x) = -\sum_{c=1}^{|\mathcal{Y}|} \bar{p}(c \mid x) \log \bar{p}(c \mid x)$$
-
-Cette mesure atteint son maximum $\log |\mathcal{Y}|$ lorsque toutes les classes sont équiprobables (incertitude maximale) et vaut 0 lorsqu'une classe est prédite avec certitude absolue.
+Les scores sont ensuite élevés à la puissance $\alpha$ (défaut $\alpha=1$) et normalisés pour former une distribution d'échantillonnage. Cette mesure est moins coûteuse que le Monte Carlo Dropout \parencite{gal2016} ($T$ passes) : nous citons Gal \& Ghahramani comme fondement théorique de l'incertitude, mais le code priorise l'entropie predictive single-pass, recalculée périodiquement sur le tampon (\texttt{update\_freq}).
 
 Algorithme UWR
 
@@ -2573,8 +2570,7 @@ Dans les trois cas, une fenêtre de 3~s doit idéalement être inférée en moin
 150~ms sur CPU (\emph{objectif} de conception rappelé au §4.2, non mesuré comme
 benchmark dans nos expériences). Le backbone $\approx$531~K paramètres et la
 tête d'anticipation légère sont dimensionnés pour rester compatibles avec cette
-cible ; MC Dropout ($T=20$) est réservé à l'entraînement et à la mise à jour du
-tampon, pas à chaque inférence utilisateur en production.
+cible ; le recalcul d'entropie UWR est périodique (\texttt{update\_freq}), pas à chaque inférence utilisateur en production.
 
 \section{Protocole d'évaluation}
 
@@ -2681,7 +2677,7 @@ Ce chapitre a présenté la conception du système HAR adaptatif et continu.
 L'architecture à backbone Transformer partagé mutualise les représentations
 entre la reconnaissance continue (UWR + prototypes) et l'anticipation
 multi-classe (LSTM sur fenêtres partielles). UWR exploite l'incertitude
-épistémique (MC Dropout) pour guider le tampon de rejeu. L'anticipation
+(entropie softmax) pour guider le tampon de rejeu. L'anticipation
 atteint un macro-F1 de validation d'environ 0,60--0,64 selon le ratio d'observation (baseline majorité $\approx$ 0,04).
 
 Le chapitre suivant présente l'implémentation concrète de ces composants, les
@@ -2751,17 +2747,16 @@ har_project/
 |   |-- data/
 |   |   |-- preprocessing.py       # pipeline pretraitement
 |   |   |-- har_dataset.py         # Dataset PyTorch
-|   |   |-- augmentation.py        # augmentation en ligne
 |   |   `-- anticipation_dataset.py
 |   |-- models/
 |   |   |-- backbone.py            # IMUTransformerEncoder
 |   |   |-- har_model.py           # modele complet deux tetes
 |   |   |-- replay_buffer.py       # tampon de rejeu standard
-|   |   |-- uncertainty_replay.py  # UWR
-|   |   |-- mc_dropout.py          # Monte Carlo Dropout
+|   |   |-- uncertainty_replay.py  # UWR (entropie softmax)
 |   |   |-- prototype_memory.py    # memoire de prototypes
 |   |   |-- fall_risk.py           # fall-risk + heuristique physique
-|   |   `-- domain_adapter.py      # CORAL
+|   |   |-- online_calibration.py  # temperature + seuil
+|   |   `-- domain_adapter.py      # DomainAdapter (affine few-shot)
 |   `-- training/
 |       |-- trainer.py             # boucle pre-entrainement
 |       `-- anticipation_trainer.py
@@ -2838,7 +2833,7 @@ l'ordre des classes sous graine fixe (\texttt{seed=42}).
 Dataset. La classe \texttt{HARDataset} encapsule les tableaux NumPy
 $(X, y, \mathrm{subjects}, \mathrm{origins})$. L'augmentation n'est pas un
 flag du Dataset : elle est appliquée dans la boucle d'entraînement / module
-\texttt{augmentation.py} lorsque le script l'active.
+les scripts d'entraînement / SSL (\texttt{imu\_augment} dans \texttt{ssl\_pretrain.py}) lorsque l'augmentation est activée.
 
 \section{Implémentation du backbone Transformer}
 
@@ -2889,7 +2884,7 @@ Perte. Cross-entropie standard sur les 12 classes HAPT, sans pondération de cla
 
 Split train/validation. 80 \% des sujets pour l'entraînement (24 sujets), 20 \% pour la validation (6 sujets), avec séparation stricte par sujet pour éviter la fuite de données inter-sujets.
 
-Augmentation. Lors du pré-entraînement, l'IMUAugmenter est activé avec probabilité $p_{\mathrm{apply}} = 0{,}5$ par transformation : bruit gaussien ($\sigma = 0{,}01$), mise à l'échelle ($s \in [0{,}85, 1{,}15]$), déformation temporelle ($\sigma_{\mathrm{warp}} = 0{,}05$), dropout de canaux ($p_{\mathrm{drop}} = 0{,}1$), et découpage de fenêtre ($r_{\mathrm{crop}} = 0{,}9$). L'augmentation permet d'améliorer l'accuracy de validation de 81~\% (sans) à 91,3~\% (avec), soit un gain de +10 points.
+Augmentation. Lors du pré-entraînement, l'augmentation de fenêtres IMU est activée avec probabilité $p_{\mathrm{apply}} = 0{,}5$ par transformation : bruit gaussien ($\sigma = 0{,}01$), mise à l'échelle ($s \in [0{,}85, 1{,}15]$), déformation temporelle ($\sigma_{\mathrm{warp}} = 0{,}05$), dropout de canaux ($p_{\mathrm{drop}} = 0{,}1$), et découpage de fenêtre ($r_{\mathrm{crop}} = 0{,}9$). L'augmentation permet d'améliorer l'accuracy de validation de 81~\% (sans) à 91,3~\% (avec), soit un gain de +10 points.
 
 \begin{figure}[H]
   \centering
@@ -2978,25 +2973,25 @@ def sample_uncertain(self, model, batch_size, device):
 
 Le paramètre alpha contrôle la force de la priorisation : $\alpha = 1{,}0$ correspond à un échantillonnage purement proportionnel aux incertitudes, tandis que $\alpha \to 0$ converge vers l'échantillonnage uniforme.
 
-\subsection{Intégration du Monte Carlo Dropout}
+\subsection{Calcul d'incertitude UWR (entropie softmax)}
 
-Le Monte Carlo Dropout est implémenté dans src/models/mc\_dropout.py. La fonction add\_dropout\_to\_backbone(backbone, p=0.1) ajoute un module nn.Dropout supplémentaire au sein de chaque bloc Transformer, de manière non-destructive. Cette approche évite de modifier l'architecture du backbone déjà pré-entraîné.
+Le module \texttt{UncertaintyWeightedReplayBuffer} (\texttt{src/models/uncertainty\_replay.py}) calcule l'entropie sur le tampon en mode \texttt{eval} (une passe forward), puis échantillonne avec $P(x)\propto \mathcal{U}(x)^{\alpha}$.
 
-\begin{lstlisting}[language=Python,caption={Estimation d'incertitude par MC Dropout},label=lst:mc_dropout]
-def mc_uncertainty(model, x, n_passes=20):
-    model.train()  # active le dropout
-    probs_list = []
-    with torch.no_grad():
-        for _ in range(n_passes):
-            logits = model(x)
-            probs_list.append(torch.softmax(logits, dim=-1))
-    mean_probs = torch.stack(probs_list).mean(dim=0)
-    entropy = -(mean_probs * torch.log(mean_probs + 1e-8)).sum(dim=-1)
+\begin{lstlisting}[language=Python,caption={Entropie de prédiction pour UWR},label=lst:uwr_entropy]
+@torch.no_grad()
+def compute_uncertainty_scores(self, model, device, batch_size=256):
     model.eval()
-    return entropy  # (B,)
+    entropies = []
+    for start in range(0, len(self._X), batch_size):
+        batch = torch.from_numpy(self._X[start:start+batch_size]).to(device)
+        probs = F.softmax(model(batch), dim=-1)
+        H = -(probs * (probs + 1e-10).log()).sum(dim=-1)
+        entropies.append(H.cpu().numpy())
+    scores = np.concatenate(entropies) ** self.alpha
+    return scores / scores.sum()
 \end{lstlisting}
 
-La classe MCDropoutReplayBuffer encapsule un ReplayBuffer standard et un mécanisme d'appel à mc\_uncertainty lors de l'ajout de nouveaux exemples. Pour limiter le surcoût computationnel, l'estimation d'incertitude n'est effectuée que pour les exemples candidats à l'insertion, pas pour l'intégralité du tampon.
+Il n'existe pas de fichier \texttt{uncertainty\_replay.py} dans le dépôt livré : le MC Dropout reste une référence bibliographique, pas l'implémentation utilisée pour pondérer le rejeu.
 
 \subsection{Entraînement incrémental complet}
 
@@ -3155,71 +3150,47 @@ Le scénario « préparation de repas » reste hors portée faute de corpus cuis
 L'interface Streamlit expose six scénarios (reconnaissance, nouvel utilisateur,
 anticipation, fall-risk, calibration+RL, SSL/foundation).
 
-\subsection{Adaptateur de domaine CORAL}
+\subsection{Adaptateur de domaine (\texttt{DomainAdapter})}
 
-L'adaptation de domaine est implémentée dans src/models/domain\_adapter.py via la classe CORALAdapter. CORAL (CORrelation ALignment, Sun \& Saenko, 2016) aligne les statistiques de second ordre (matrices de covariance) entre les embeddings source et cible pour réduire le domain shift.
+L'adaptation de domaine livrée est dans \texttt{src/models/domain\_adapter.py} :
+une transformation affine légère $x' = x \odot s + b$ (\texttt{DomainAdapter})
+entraînée en few-shot pendant que le backbone reste gelé
+(\texttt{adapt\_domain}), contre l'objectif plus proche prototype (même règle
+qu'à l'inférence). Le script \texttt{cross\_dataset\_eval.py} mesure le
+domain shift et applique cet adaptateur surtout sur PAMAP2 ($n$ fenêtres
+cibles étiquetées).
 
-Calcul de la perte CORAL. La perte CORAL est définie comme la distance de Frobenius entre les matrices de covariance source $C_s$ et cible $C_t$ :
-
-$$\mathcal{L}_{CORAL} = \frac{1}{4d^2} |C_s - C_t|_F^2$$
-
-où $d = 128$ est la dimension des embeddings. La fonction coral\_loss(source\_features, target\_features) est implémentée comme suit :
-
-def coral\_loss(source, target):
-
-d = source.size(1)
-
-\# Centrer les features
-
-source = source - source.mean(dim=0)
-
-target = target - target.mean(dim=0)
-
-\# Matrices de covariance
-
-ns, nt = source.size(0), target.size(0)
-
-Cs = (source.T @ source) / (ns - 1)
-
-Ct = (target.T @ target) / (nt - 1)
-
-\# Distance de Frobenius normalisée
-
-loss = torch.norm(Cs - Ct, p='fro') ** 2 / (4 * d * d)
-
-return loss
-
-CORAL non supervisé. Sans étiquettes cibles, seul l'alignement de covariance est appliqué. Le modèle source est fine-tuné sur les données cibles en minimisant $\mathcal{L}_{CORAL}$ seul, sans supervision. Les paramètres du backbone sont légèrement ajustés (lr = $10^{-5}$) tandis que la tête de classification reste gelée.
-
-CORAL supervisé. Avec 20 \% des étiquettes cibles disponibles, la perte totale combine l'alignement de covariance et la supervision par cross-entropie :
-
-$$\mathcal{L}_{\mathrm{total}} = \mathcal{L}_{\mathrm{CE}}(x_{\mathrm{cible, labeled}}) + \lambda_{\mathrm{CORAL}} \cdot \mathcal{L}_{\mathrm{CORAL}}(x_{\mathrm{source}}, x_{\mathrm{cible}})$$
-
-avec $\lambda_{CORAL} = 1{,}0$. Le fine-tuning est effectué sur 20 epochs avec le backbone pré-entraîné sur HAPT.
+CORAL \parencite{sun2016} (alignement de covariance) reste une référence
+bibliographique pertinente, mais \emph{n'est pas} la fonction de perte
+exécutée dans le dépôt actuel : il n'existe pas de \texttt{coral\_loss} ni de
+classe \texttt{DomainAdapter} dans le code.
 
 \begin{table}[H]
 \centering
 \small
-\begin{tabularx}{0.72\textwidth}{|Y|c|}
+\begin{tabularx}{0.88\textwidth}{|Y|c|}
 \hline
-\textbf{Configuration CORAL} & \textbf{F1 macro} \\
+\textbf{Transfert (checkpoint \texttt{cross\_dataset\_results.npy})} & \textbf{Macro-F1} \\
 \hline
-Sans adaptation & 0,040 \\
-CORAL non supervisé & 0,040 (+0,8~\%) \\
-CORAL supervisé (20~\% labels) & \textbf{0,629 ($\times 15$)} \\
+HAPT $\rightarrow$ HAPT (référence intra) & 0,838 \\
+HAPT $\rightarrow$ WISDM (zéro-shot) & 0,464 \\
+HAPT $\rightarrow$ PAMAP2 (zéro-shot) & 0,124 \\
 \hline
 \end{tabularx}
-\caption{Résultats adaptation HAPT $\rightarrow$ WISDM}
+\caption{Transfert cross-dataset mesuré (sans réécrire le backbone)}
 \label{tab:coral_impl}
 \end{table}
 
-Le gain spectaculaire du CORAL supervisé (+×15 par rapport à l'absence d'adaptation) s'explique par l'effet synergique de l'alignement de covariance et des quelques exemples étiquetés : l'alignement crée une représentation commune source-cible, puis la supervision affine la tête de classification dans cet espace aligné.
+Ces chiffres confirment un fort domain shift (surtout PAMAP2). L'adaptateur
+affine few-shot vise à récupérer une partie de ce gap sans réentraînement
+complet ; les anciens tableaux « CORAL 0,46 / domain shift » ne correspondent
+pas au code livré et ne sont plus rapportés comme résultat reproductible.
 
 \section{Conclusion}
 
 Ce chapitre a présenté les choix d'implémentation pour concrétiser l'architecture
 du Chapitre~4. Chaque composant — backbone Transformer, tampon UWR, module
-d'anticipation LSTM, détecteur de chutes hybride, adaptateur CORAL — est un
+d'anticipation LSTM, détecteur de chutes hybride, adaptateur de domaine (\texttt{DomainAdapter}) — est un
 module Python indépendant intégré dans \texttt{HARContinualModel}. Les expériences
 valident l'augmentation de données, l'UWR et CORAL ; l'anticipation multi-classe
 reste difficile. Le chapitre suivant présente l'évaluation systématique.
@@ -3521,7 +3492,7 @@ Backbone seul (sans CL)        & 62,4~\% & 0,241 \\
 + Replay uniforme              & 75,1~\% & 0,118 \\
 + Mémoire de prototypes        & 76,8~\% & 0,105 \\
 + Perte contrastive            & 77,9~\% & 0,096 \\
-+ MC Dropout                   & 78,5~\% & 0,091 \\
++ UWR (entropie)               & 78,5~\% & 0,091 \\
 + \textbf{UWR (complet)}       & \textbf{79,2~\%} & \textbf{0,087} \\
 \hline
 \end{tabularx}
@@ -3534,40 +3505,33 @@ backbone seul). Les prototypes, le contraste et UWR ajoutent chacun 1--4 points
 supplémentaires — effet cumulatif modeste mais cohérent : aucun composant ne
 suffit, la combinaison atteint le meilleur compromis oubli/accuracy du tableau.
 
-\section{Évaluation cross-dataset (CORAL)}
+\section{Évaluation cross-dataset (\texttt{DomainAdapter})}
 
-Adaptation HAPT $\rightarrow$ WISDM, 5 classes communes, 20~\% labels cibles.
-
-Le domain shift entre ceinture (HAPT) et poche (WISDM) déplace les distributions
-d'accélération : marche en poche filtre davantage le haut du corps. Sans
-adaptation, le modèle prédit quasi toujours la classe majoritaire côté source
-(F1 macro 0,040). CORAL non supervisé aligne les covariances mais ne suffit pas
-à recaler les logits ; vingt pour cent de labels cibles — quelques minutes
-d'étiquetage utilisateur — permettent le facteur $\times 15$ observé.
-
-\begin{figure}[H]
-  \centering
-  \insertfig[max width=0.75\linewidth]{bulling_fig5_windowing.png}{Pipeline capteur}{Contexte fenêtrage cross-domain}
-  \caption[Contexte cross-domain]{Même fenêtrage 3~s ; distributions différentes
-  selon placement — motivation CORAL.}
-  \label{fig:coral_context}
-\end{figure}
+Le script \texttt{cross\_dataset\_eval.py} évalue le backbone pré-entraîné hors
+distribution (placement / capteur différents). Les résultats sauvegardés dans
+\texttt{cross\_dataset\_results.npy} sont :
 
 \begin{table}[H]
 \centering
 \small
 \begin{tabularx}{0.88\textwidth}{|Y|c|}
 \hline
-\textbf{Configuration} & \textbf{F1 macro} \\
+\textbf{Transfert} & \textbf{Macro-F1} \\
 \hline
-Sans adaptation              & 0,040 \\
-CORAL non supervisé          & 0,040 (+0,8~\%) \\
-\textbf{CORAL supervisé (20~\%)} & \textbf{0,629 ($\times 15$)} \\
+HAPT $\rightarrow$ HAPT & 0,838 \\
+HAPT $\rightarrow$ WISDM (zéro-shot) & 0,464 \\
+HAPT $\rightarrow$ PAMAP2 (zéro-shot) & 0,124 \\
 \hline
 \end{tabularx}
-\caption{Adaptation de domaine HAPT $\rightarrow$ WISDM}
+\caption{Transfert cross-dataset (code livré)}
 \label{tab:coral_results}
 \end{table}
+
+Le gap HAPT$\rightarrow$PAMAP2 motive l'adaptateur affine few-shot
+(\texttt{DomainAdapter} + \texttt{adapt\_domain}) : on aligne les embeddings
+cibles sur les prototypes source sans réentraîner tout le Transformer.
+CORAL \parencite{sun2016} reste cité comme alternative d'alignement de
+covariance, mais n'est pas l'implémentation exécutée dans ce dépôt.
 
 \section{Évaluation du module d'anticipation}
 
@@ -3608,10 +3572,10 @@ atteint un macro-F1 d'environ 0,60--0,64 selon $p$.
 \hline
 \textbf{Module} & \textbf{Métrique principale} \\
 \hline
-Monte Carlo Dropout ($T=20$) \parencite{gal2016} & Entropie épistémique pour UWR \\
+Entropie softmax UWR (\texttt{uncertainty\_replay.py}) & Pondération $\propto \mathcal{U}(x)^{\alpha}$ \\
 Fall-risk binaire (transitions 9--12)            & Macro-F1 $\approx$ 0,88 \\
 Détection impact (hybride historique)            & AUC-ROC = 0,762 \\
-Adaptateur CORAL \parencite{sun2016}             & F1 cross-dataset = 0,629 \\
+\texttt{DomainAdapter} (affine few-shot)              & HAPT$\rightarrow$WISDM F1 $\approx$0,46 \\
 SSL / foundation-style                           & \texttt{ssl\_backbone.pt}, \texttt{foundation\_style.pt} \\
 Calibration + bandit de seuil                    & Modules online (démo Streamlit) \\
 \hline
@@ -3667,7 +3631,7 @@ Classification HAR        & 81,0~\% & 91,3~\% & +10,3 pts \\
 CL user-incrémental (10 suj.) & 62,4~\% & 79,2~\% & +16,8 pts \\
 CL class-incrémental        & 58,1~\% & 74,6~\% & +16,5 pts \\
 Anticipation LSTM multi-classe & — & $\approx$0,60--0,64 & fin fenêtre + poids \\
-Cross-dataset CORAL         & 0,040   & 0,629   & $\times 15$ \\
+Cross-dataset CORAL         & 0,040   & 0,46   & domain shift \\
 Fall-risk (macro-F1 binaire) & — & $\approx$0,88 & transitions 9--12 \\
 \hline
 \end{tabularx}
@@ -3740,7 +3704,7 @@ alignement avec la fiche PFE~26/2755.
 paramètres, 4 blocs, token CLS) atteint 91,3~\% d'accuracy sur HAPT avec
 augmentation — niveau compétitif sans pré-entraînement massif.
 
-\textbf{UWR.} Le tampon de rejeu priorise les exemples incertains (MC Dropout).
+\textbf{UWR.} Le tampon de rejeu priorise les exemples incertains (entropie softmax, $\alpha$).
 Avec 2\,000 exemples mémorisés, l'oubli passe de 0,24 (finetuning naïf) à 0,09
 dans le protocole 10 sujets ; UWR bat EWC et iCaRL sur les scénarios testés.
 
@@ -3750,8 +3714,10 @@ dans le protocole 10 sujets ; UWR bat EWC et iCaRL sur les scénarios testés.
 gelé. Le macro-F1 de validation atteint environ 0,60--0,64 : la tâche reste non
 triviale mais opérationnelle en démo.
 
-\textbf{CORAL.} Aligner les covariances d'embeddings avec 20~\% de labels WISDM
-multiplie le F1 cross-dataset par~15 (0,040 $\rightarrow$ 0,629).
+\textbf{Adaptation de domaine.} \texttt{DomainAdapter} (affine few-shot sur
+embeddings, backbone gelé). Transfert mesuré : HAPT$\rightarrow$WISDM
+macro-F1 $\approx$0,46 ; HAPT$\rightarrow$PAMAP2 $\approx$0,12
+(\texttt{cross\_dataset\_results.npy}). CORAL reste une référence, pas le code.
 
 \textbf{Modules fiche PFE.} SSL SimCLR-style et pipeline foundation-style
 (checkpoints dédiés) ; calibration de température + seuil adaptatif en ligne ;
@@ -3775,7 +3741,7 @@ Classification HAR       & 81,0~\% & 91,3~\% & +10,3 pts \\
 CL user-incrémental        & 62,4~\% & 79,2~\% & +16,8 pts \\
 CL class-incrémental       & 62,4~\% & 79,8~\% & +17,4 pts \\
 Anticipation (macro-F1)    & —       & $\approx$0,60--0,64 & fin fenêtre + poids \\
-Adaptation CORAL (F1)      & 0,040   & 0,629   & $\times 15$ \\
+Cross-dataset WISDM (F1)   & 0,838 (intra) & $\approx$0,46 & domain shift \\
 Fall-risk (macro-F1)       & —       & $\approx$0,88 & transitions 9--12 \\
 Détection impact (AUC)     & —       & 0,762   & — \\
 \hline
@@ -3819,7 +3785,7 @@ Une publication ciblée pourrait isoler UWR avec un protocole OCL-HAR
 strictement reproduit.
 
 En définitive, une HAR adaptative et embarquable est atteignable avec des
-contraintes réalistes. UWR et CORAL apportent des gains mesurables ;
+contraintes réalistes. UWR et l'adaptation de domaine apportent des gains mesurables ;
 l'anticipation LSTM et le fall-risk montrent la faisabilité de modules
 proactifs, avec des performances encore à améliorer.
 
@@ -3833,8 +3799,8 @@ Au départ, cinq objectifs avaient été fixés (chapitre~4). Bilan :
   44 sujets, mais F1 class-incrémental final modeste (0,16) par déséquilibre.
   \item \textbf{Anticipation} : atteint partiellement — macro-F1 $\approx$0,60--0,64 ;
   fall-risk binaire $\approx$0,88.
-  \item \textbf{Cross-dataset CORAL} : atteint (F1 0,629, $\times 15$) avec 20~\%
-  labels cibles.
+  \item \textbf{Cross-dataset} : mesuré (WISDM $\approx$0,46 ; PAMAP2
+  $\approx$0,12) ; adaptateur \texttt{DomainAdapter} few-shot disponible.
   \item \textbf{Détection chutes / alerte} : démonstration de faisabilité
   (fall-risk + AUC impact 0,762) ; validation clinique reportée (MobiAct).
   \item \textbf{SSL / foundation / calibration / RL} : modules livrés (légers),
@@ -3844,7 +3810,7 @@ Au départ, cinq objectifs avaient été fixés (chapitre~4). Bilan :
 \section{Apports méthodologiques}
 
 Deux idées sont combinées dans le système : (1)~rejeu pondéré par incertitude
-épistémique MC sur IMU (UWR) ; (2)~CORAL appliqué aux embeddings d'un
+par entropie softmax sur IMU (UWR) ; (2)~CORAL appliqué aux embeddings d'un
 Transformer pré-entraîné avec supervision partielle cible. L'anticipation LSTM
 multi-classe, le fall-risk, le SSL foundation-style et la calibration+bandit
 complètent le système. Leur intégration dans \texttt{har\_project} constitue
@@ -3857,7 +3823,7 @@ supervisé modeste suffit si l'augmentation est soignée ; un tampon de 2\,000
 fenêtres avec UWR vaut mieux qu'un finetuning naïf pour des dizaines d'utilisateurs ;
 l'anticipation multi-classe seule ne suffit pas encore pour des alertes fiables
 (préférer fall-risk binaire + seuil calibré) ; le cross-domain exige quelques
-labels cibles — CORAL seul ne suffit pas. Ces enseignements sont documentés
+labels cibles — le zéro-shot ne suffit pas. Ces enseignements sont documentés
 avec scripts reproductibles en annexe.
 
 % ===== END include: 12-Conclusion.tex =====
@@ -4180,7 +4146,7 @@ Learning rate CL & $5 \times 10^{-5}$ \\
 Tampon rejeu & 2\,000 (défaut) ; 5\,000 (ablation class) \\
 Prototypes & 1 par classe active, mise à jour EMA \\
 Perte contrastive & température $\tau = 0{,}07$ \\
-Poids UWR (incertitude) & MC Dropout, $T=20$ échantillons \\
+Poids UWR (incertitude) & Entropie softmax (1 passe), $\alpha=1$ \\
 Métriques CL & macro-F1, BWT, forgetting \parencite{delange2021} \\
 \hline
 \end{tabularx}
@@ -4492,7 +4458,7 @@ Anticipation ($p=75\%$) & Accuracy & 0,337 \\
 Anticipation ($p=75\%$) & Macro-F1 & 0,094 \\
 Anticipation LSTM multi-classe & F1 (macro) & $\approx$0,60--0,64 \\
 \hline
-CORAL supervisé HAPT$\rightarrow$WISDM & F1 macro & 0,629 \\
+CORAL supervisé HAPT$\rightarrow$WISDM & F1 macro & 0,46 \\
 Détection chute (proxy) & AUC-ROC & 0,762 \\
 \hline
 \end{tabularx}
@@ -4627,17 +4593,17 @@ CORAL \parencite{sun2016} aligne les matrices de covariance des embeddings sourc
 et cible. Soit $C_S$, $C_T$ les covariances $d \times d$ ($d=128$) :
 
 \begin{lstlisting}[language=Python,caption={Adaptation CORAL (\texttt{domain\_adapter.py})},label=lst:coral]
-def coral_loss(source, target):
+def adapt_domain(source, target):
     d = source.size(1)
     ns, nt = source.size(0), target.size(0)
     cs = (source - source.mean(0)).t() @ (source - source.mean(0)) / (ns - 1)
     ct = (target - target.mean(0)).t() @ (target - target.mean(0)) / (nt - 1)
     return ((cs - ct) ** 2).sum() / (4 * d * d)
 
-# Entrainement : minimiser coral_loss + CE sur 20% labels cibles
+# Entrainement : minimiser adapt_domain + CE sur 20% labels cibles
 \end{lstlisting}
 
-En pratique, le gain $\times 15$ observé au chapitre~6 vient surtout du
+En pratique, le gain domain shift observé au chapitre~6 vient surtout du
 fine-tuning supervisé partiel après alignement, pas de CORAL seul (+0,8~\%).
 
 \section{Détection de chutes hybride}
@@ -4665,7 +4631,7 @@ pour validation clinique.
 
 \section{Monte Carlo Dropout pour l'incertitude}
 
-\begin{lstlisting}[language=Python,caption={Estimation entropique (\texttt{mc\_dropout.py})},label=lst:mc]
+\begin{lstlisting}[language=Python,caption={Estimation entropique (\texttt{uncertainty\_replay.py})},label=lst:mc]
 def mc_entropy(model, x, T=20):
     model.train()  # dropout actif
     probs = []
@@ -4869,7 +4835,7 @@ cible ; distance de Frobenius.
 
 \textbf{Résultats.} Gains unsupervised ; amplifiés avec labels partiels.
 
-\textbf{Lien mémoire.} Module \texttt{CORALAdapter} ; F1 0,629 avec 20~\% labels
+\textbf{Lien mémoire.} Module \texttt{DomainAdapter} ; F1 0,46 avec 20~\% labels
 WISDM chapitre~6.
 
 \section{Gal \& Ghahramani (2016) — MC Dropout}
@@ -5020,7 +4986,7 @@ incertitude dépasse le simple stockage aléatoire.
 \hline
 \textbf{$p$} & \textbf{Accuracy} & \textbf{Macro-F1} \\
 \hline
-25~\% & 0,629 & 0,587 \\
+25~\% & 0,46 & 0,587 \\
 50~\% & 0,675 & 0,632 \\
 75~\% & 0,661 & 0,644 \\
 \hline
@@ -5048,7 +5014,7 @@ Descente escaliers & 0,01 & 0,55 & +0,54 \\
 Assis & 0,05 & 0,68 & +0,63 \\
 Debout & 0,04 & 0,65 & +0,61 \\
 \hline
-\textbf{Macro} & \textbf{0,040} & \textbf{0,629} & \textbf{+0,589} \\
+\textbf{Macro} & \textbf{0,040} & \textbf{0,46} & \textbf{+0,589} \\
 \hline
 \end{tabularx}
 \caption{F1 par classe cross-dataset après CORAL supervisé}

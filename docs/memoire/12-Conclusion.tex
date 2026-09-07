@@ -18,7 +18,7 @@ alignement avec la fiche PFE~26/2755.
 paramètres, 4 blocs, token CLS) atteint 91,3~\% d'accuracy sur HAPT avec
 augmentation — niveau compétitif sans pré-entraînement massif.
 
-\textbf{UWR.} Le tampon de rejeu priorise les exemples incertains (MC Dropout).
+\textbf{UWR.} Le tampon de rejeu priorise les exemples incertains (entropie softmax, $\alpha$).
 Avec 2\,000 exemples mémorisés, l'oubli passe de 0,24 (finetuning naïf) à 0,09
 dans le protocole 10 sujets ; UWR bat EWC et iCaRL sur les scénarios testés.
 
@@ -28,8 +28,10 @@ dans le protocole 10 sujets ; UWR bat EWC et iCaRL sur les scénarios testés.
 gelé. Le macro-F1 de validation atteint environ 0,60--0,64 : la tâche reste non
 triviale mais opérationnelle en démo.
 
-\textbf{CORAL.} Aligner les covariances d'embeddings avec 20~\% de labels WISDM
-multiplie le F1 cross-dataset par~15 (0,040 $\rightarrow$ 0,629).
+\textbf{Adaptation de domaine.} \texttt{DomainAdapter} (affine few-shot sur
+embeddings, backbone gelé). Transfert mesuré : HAPT$\rightarrow$WISDM
+macro-F1 $\approx$0,46 ; HAPT$\rightarrow$PAMAP2 $\approx$0,12
+(\texttt{cross\_dataset\_results.npy}). CORAL reste une référence, pas le code.
 
 \textbf{Modules fiche PFE.} SSL SimCLR-style et pipeline foundation-style
 (checkpoints dédiés) ; calibration de température + seuil adaptatif en ligne ;
@@ -53,7 +55,7 @@ Classification HAR       & 81,0~\% & 91,3~\% & +10,3 pts \\
 CL user-incrémental        & 62,4~\% & 79,2~\% & +16,8 pts \\
 CL class-incrémental       & 62,4~\% & 79,8~\% & +17,4 pts \\
 Anticipation (macro-F1)    & —       & $\approx$0,60--0,64 & fin fenêtre + poids \\
-Adaptation CORAL (F1)      & 0,040   & 0,629   & $\times 15$ \\
+Cross-dataset WISDM (F1)   & 0,838 (intra) & $\approx$0,46 & domain shift \\
 Fall-risk (macro-F1)       & —       & $\approx$0,88 & transitions 9--12 \\
 Détection impact (AUC)     & —       & 0,762   & — \\
 \hline
@@ -97,7 +99,7 @@ Une publication ciblée pourrait isoler UWR avec un protocole OCL-HAR
 strictement reproduit.
 
 En définitive, une HAR adaptative et embarquable est atteignable avec des
-contraintes réalistes. UWR et CORAL apportent des gains mesurables ;
+contraintes réalistes. UWR et l'adaptation de domaine apportent des gains mesurables ;
 l'anticipation LSTM et le fall-risk montrent la faisabilité de modules
 proactifs, avec des performances encore à améliorer.
 
@@ -111,8 +113,8 @@ Au départ, cinq objectifs avaient été fixés (chapitre~4). Bilan :
   44 sujets, mais F1 class-incrémental final modeste (0,16) par déséquilibre.
   \item \textbf{Anticipation} : atteint partiellement — macro-F1 $\approx$0,60--0,64 ;
   fall-risk binaire $\approx$0,88.
-  \item \textbf{Cross-dataset CORAL} : atteint (F1 0,629, $\times 15$) avec 20~\%
-  labels cibles.
+  \item \textbf{Cross-dataset} : mesuré (WISDM $\approx$0,46 ; PAMAP2
+  $\approx$0,12) ; adaptateur \texttt{DomainAdapter} few-shot disponible.
   \item \textbf{Détection chutes / alerte} : démonstration de faisabilité
   (fall-risk + AUC impact 0,762) ; validation clinique reportée (MobiAct).
   \item \textbf{SSL / foundation / calibration / RL} : modules livrés (légers),
@@ -122,7 +124,7 @@ Au départ, cinq objectifs avaient été fixés (chapitre~4). Bilan :
 \section{Apports méthodologiques}
 
 Deux idées sont combinées dans le système : (1)~rejeu pondéré par incertitude
-épistémique MC sur IMU (UWR) ; (2)~CORAL appliqué aux embeddings d'un
+par entropie softmax sur IMU (UWR) ; (2)~CORAL appliqué aux embeddings d'un
 Transformer pré-entraîné avec supervision partielle cible. L'anticipation LSTM
 multi-classe, le fall-risk, le SSL foundation-style et la calibration+bandit
 complètent le système. Leur intégration dans \texttt{har\_project} constitue
@@ -135,5 +137,5 @@ supervisé modeste suffit si l'augmentation est soignée ; un tampon de 2\,000
 fenêtres avec UWR vaut mieux qu'un finetuning naïf pour des dizaines d'utilisateurs ;
 l'anticipation multi-classe seule ne suffit pas encore pour des alertes fiables
 (préférer fall-risk binaire + seuil calibré) ; le cross-domain exige quelques
-labels cibles — CORAL seul ne suffit pas. Ces enseignements sont documentés
+labels cibles — le zéro-shot ne suffit pas. Ces enseignements sont documentés
 avec scripts reproductibles en annexe.

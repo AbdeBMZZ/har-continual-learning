@@ -279,7 +279,7 @@ Backbone seul (sans CL)        & 62,4~\% & 0,241 \\
 + Replay uniforme              & 75,1~\% & 0,118 \\
 + Mémoire de prototypes        & 76,8~\% & 0,105 \\
 + Perte contrastive            & 77,9~\% & 0,096 \\
-+ MC Dropout                   & 78,5~\% & 0,091 \\
++ UWR (entropie)               & 78,5~\% & 0,091 \\
 + \textbf{UWR (complet)}       & \textbf{79,2~\%} & \textbf{0,087} \\
 \hline
 \end{tabularx}
@@ -292,40 +292,33 @@ backbone seul). Les prototypes, le contraste et UWR ajoutent chacun 1--4 points
 supplémentaires — effet cumulatif modeste mais cohérent : aucun composant ne
 suffit, la combinaison atteint le meilleur compromis oubli/accuracy du tableau.
 
-\section{Évaluation cross-dataset (CORAL)}
+\section{Évaluation cross-dataset (\texttt{DomainAdapter})}
 
-Adaptation HAPT $\rightarrow$ WISDM, 5 classes communes, 20~\% labels cibles.
-
-Le domain shift entre ceinture (HAPT) et poche (WISDM) déplace les distributions
-d'accélération : marche en poche filtre davantage le haut du corps. Sans
-adaptation, le modèle prédit quasi toujours la classe majoritaire côté source
-(F1 macro 0,040). CORAL non supervisé aligne les covariances mais ne suffit pas
-à recaler les logits ; vingt pour cent de labels cibles — quelques minutes
-d'étiquetage utilisateur — permettent le facteur $\times 15$ observé.
-
-\begin{figure}[H]
-  \centering
-  \insertfig[max width=0.75\linewidth]{bulling_fig5_windowing.png}{Pipeline capteur}{Contexte fenêtrage cross-domain}
-  \caption[Contexte cross-domain]{Même fenêtrage 3~s ; distributions différentes
-  selon placement — motivation CORAL.}
-  \label{fig:coral_context}
-\end{figure}
+Le script \texttt{cross\_dataset\_eval.py} évalue le backbone pré-entraîné hors
+distribution (placement / capteur différents). Les résultats sauvegardés dans
+\texttt{cross\_dataset\_results.npy} sont :
 
 \begin{table}[H]
 \centering
 \small
 \begin{tabularx}{0.88\textwidth}{|Y|c|}
 \hline
-\textbf{Configuration} & \textbf{F1 macro} \\
+\textbf{Transfert} & \textbf{Macro-F1} \\
 \hline
-Sans adaptation              & 0,040 \\
-CORAL non supervisé          & 0,040 (+0,8~\%) \\
-\textbf{CORAL supervisé (20~\%)} & \textbf{0,629 ($\times 15$)} \\
+HAPT $\rightarrow$ HAPT & 0,838 \\
+HAPT $\rightarrow$ WISDM (zéro-shot) & 0,464 \\
+HAPT $\rightarrow$ PAMAP2 (zéro-shot) & 0,124 \\
 \hline
 \end{tabularx}
-\caption{Adaptation de domaine HAPT $\rightarrow$ WISDM}
+\caption{Transfert cross-dataset (code livré)}
 \label{tab:coral_results}
 \end{table}
+
+Le gap HAPT$\rightarrow$PAMAP2 motive l'adaptateur affine few-shot
+(\texttt{DomainAdapter} + \texttt{adapt\_domain}) : on aligne les embeddings
+cibles sur les prototypes source sans réentraîner tout le Transformer.
+CORAL \parencite{sun2016} reste cité comme alternative d'alignement de
+covariance, mais n'est pas l'implémentation exécutée dans ce dépôt.
 
 \section{Évaluation du module d'anticipation}
 
@@ -366,10 +359,10 @@ atteint un macro-F1 d'environ 0,60--0,64 selon $p$.
 \hline
 \textbf{Module} & \textbf{Métrique principale} \\
 \hline
-Monte Carlo Dropout ($T=20$) \parencite{gal2016} & Entropie épistémique pour UWR \\
+Entropie softmax UWR (\texttt{uncertainty\_replay.py}) & Pondération $\propto \mathcal{U}(x)^{\alpha}$ \\
 Fall-risk binaire (transitions 9--12)            & Macro-F1 $\approx$ 0,88 \\
 Détection impact (hybride historique)            & AUC-ROC = 0,762 \\
-Adaptateur CORAL \parencite{sun2016}             & F1 cross-dataset = 0,629 \\
+\texttt{DomainAdapter} (affine few-shot)              & HAPT$\rightarrow$WISDM F1 $\approx$0,46 \\
 SSL SimCLR-style / foundation-style              & Checkpoints \texttt{ssl\_backbone.pt}, \texttt{foundation\_style.pt} \\
 Calibration + bandit de seuil                    & Modules online (démo Streamlit) \\
 \hline
@@ -428,7 +421,7 @@ Classification HAR        & 81,0~\% & 91,3~\% & +10,3 pts \\
 CL user-incrémental (10 suj.) & 62,4~\% & 79,2~\% & +16,8 pts \\
 CL class-incrémental        & 58,1~\% & 74,6~\% & +16,5 pts \\
 Anticipation LSTM multi-classe & — & $\approx$0,60--0,64 & fin fenêtre + poids \\
-Cross-dataset CORAL         & 0,040   & 0,629   & $\times 15$ \\
+Cross-dataset WISDM         & 0,838 (intra) & $\approx$0,46 & domain shift \\
 Fall-risk (macro-F1 binaire) & — & $\approx$0,88 & transitions 9--12 \\
 \hline
 \end{tabularx}
@@ -455,8 +448,8 @@ Trois axes ressortent des expériences pour un déploiement réel.
 
 \textbf{Tampon domain-aware.} L'oubli PAMAP2 (tâches 37--44) suggère d'étiqueter
 les exemples du rejeu par domaine capteur et de garantir un quota minimum lors
-de l'échantillonnage UWR. CORAL intermédiaire avant chaque nouveau domaine
-pourrait stabiliser les embeddings.
+de l'échantillonnage UWR. Un \texttt{DomainAdapter} (ou CORAL bibliographique)
+intermédiaire avant chaque nouveau domaine pourrait stabiliser les embeddings.
 
 \textbf{Anticipation.} Améliorer le contexte temporel et le déséquilibre
 (oversampling des transitions, entraînement conjoint plus poussé) pour relever
@@ -470,6 +463,6 @@ les exemples d'application de la fiche.
 
 Les expériences confirment la chaîne conception (ch.~4) $\rightarrow$ implémentation
 (ch.~5) : backbone compétitif, UWR efficace, anticipation LSTM opérationnelle
-mais encore limitée, CORAL synergique avec le pré-entraînement. Les axes
+mais encore limitée ; l'adaptation de domaine reste un levier cross-capteur. Les axes
 d'amélioration (tampon plus grand, MobiAct, anticipation) sont identifiés
 pour la suite.
