@@ -1,51 +1,27 @@
-# Justifications — Points absents du PFE
+# Justifications — Points absents / maintenant couverts
 
-## 1. Pourquoi pas d'apprentissage auto-supervisé ?
+> Mise à jour : des modules **légers** ont été ajoutés pour coller à la fiche
+> (`docs/fiche_coverage.md`). Ce qui suit reste la justification des *limites*.
 
-L'apprentissage auto-supervisé (SSL) nécessite des **données non étiquetées en grande quantité**
-pour fonctionner efficacement (typiquement 10x plus que le supervisé).
+## 1. Auto-supervisé (SSL)
 
-Dans notre cas :
-- Les 3 datasets utilisés (HAPT, WISDM, PAMAP2) sont **entièrement étiquetés**
-- Le volume total (56 861 fenêtres) est suffisant pour le supervisé mais marginal pour le SSL
-- Les méthodes SSL pour séries temporelles IMU (TNC, TS-TCC, SimCLR-TS) nécessitent
-  des augmentations spécifiques (jitter, scaling, permutation) qui peuvent altérer
-  les patterns d'activité et introduire des artefacts
+**Avant** : non implémenté (données entièrement labellisées, volume marginal).
 
-**Notre choix** : l'apprentissage supervisé avec perte contrastive (Module 1)
-capture déjà l'essentiel des avantages du SSL (séparation inter-classes, 
-représentations robustes) sans ses contraintes de données.
+**Maintenant** : prétrain SimCLR-style IMU dans `scripts/train_ssl.py`
+(augmentations bruit/scale/mask + NT-Xent). Utile comme étape optionnelle
+avant fine-tuning ; ce n’est pas un SSL massif type industrie.
 
-**Perspective future** : intégrer un pré-entraînement SSL sur des données IMU
-non étiquetées (ex. données brutes de smartwatch) avant le fine-tuning supervisé.
+## 2. Modèles de fondation
 
----
+Toujours **pas** de FM public (TimesNet/UniTS/MOMENT non intégrés).
 
-## 2. Pourquoi pas de modèles de fondation pré-entraînés ?
-
-Les modèles de fondation pour les séries temporelles IMU sont un domaine
-**très récent (2023-2024)** et présentent plusieurs limitations dans notre contexte :
-
-| Modèle | Problème |
-|--------|----------|
-| TimesNet, PatchTST | Conçus pour la prévision, pas la classification |
-| UniTS | Domaine général, pas spécifique aux capteurs IMU |
-| IMU-Transformer | Pré-entraîné sur des données propriétaires non disponibles |
-
-**Notre choix** : entraîner un Transformer from scratch sur nos 3 datasets
-permet un contrôle total sur la représentation apprise, une adaptation
-directe à la structure temporelle de l'IMU (50 Hz, 6 canaux), et 
-évite les problèmes de distribution shift entre le domaine de pré-entraînement
-et nos données.
-
-**Perspective future** : évaluer MOMENT ou UniTS comme backbone alternatif
-dans un cadre de transfer learning.
-
----
+**Maintenant** : pipeline *foundation-style* `scripts/train_foundation_style.py`
+= SSL → fine-tune supervisé à l’échelle HAPT/WISDM. À présenter comme
+*pattern* fondation, pas comme modèle de fondation.
 
 ## 3. Contribution originale — Replay pondéré par incertitude
 
-Notre contribution principale est le **Uncertainty-Weighted Replay** :
+Notre contribution principale reste le **Uncertainty-Weighted Replay** :
 
 Au lieu de tirer aléatoirement des exemples du tampon de rejeu :
 ```
@@ -62,3 +38,12 @@ exactement au bon moment.
 - α=0 : replay uniforme (équivalent classique)
 - α=1 : proportionnel à l'entropie
 - α>1 : encore plus focalisé sur les exemples incertains
+
+## 4. RL, chute, repas, calibration
+
+| Point | Couverture |
+|-------|------------|
+| RL | Bandit ε-greedy sur seuil d’alerte (`rl_threshold_agent.py`) |
+| Chute préventive | Anticipation binaire des transitions 9–12 + heuristique physique |
+| Repas | Non entraînable sans corpus cuisine (`adl_scenarios.py`) |
+| Calibration online | Temperature scaling + seuil adaptatif |

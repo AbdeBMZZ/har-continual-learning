@@ -1,0 +1,475 @@
+\chapter{Évaluation de la solution}
+\label{ch:11-Evaluation}
+
+\section{Introduction}
+
+Ce chapitre présente l'évaluation expérimentale complète du système
+\texttt{HARContinualModel} (\texttt{har\_project/}). Les protocoles reprennent
+ceux définis au chapitre~4 : pré-entraînement supervisé, apprentissage
+user- et class-incrémental, comparaison aux baselines (EWC, iCaRL), ablation,
+adaptation cross-dataset (CORAL), anticipation et détection de chutes.
+
+Nous structurons la lecture en trois blocs : (1)~qualité du backbone seul
+(classification HAPT et comparaison SOTA) ; (2)~apprentissage continu avec
+métriques forgetting/BWT sur protocoles 10 et 44 sujets ; (3)~modules auxiliaires
+(anticipation LSTM multi-classe, CORAL, chutes). Les chiffres 10 sujets proviennent du
+cahier des charges initial ; les runs 44 sujets reflètent l'état du dépôt
+\texttt{har\_project} fusion multi-jeux — les deux coexistent volontairement avec
+explicitation des protocoles dans chaque tableau.
+
+\section{Résultats du pré-entraînement}
+
+\subsection{Courbes d'apprentissage}
+
+Le backbone \emph{IMUTransformerEncoder} ($d=128$, 4 blocs, 531\,457 paramètres)
+est pré-entraîné sur HAPT avec AdamW ($\mathrm{lr}=10^{-3}$, scheduler cosinus,
+30--100 époques). La figure~\ref{fig:pretrain} montre la convergence ; l'augmentation
+de données apporte \textbf{+10,3 points} d'accuracy (81,0~\% $\rightarrow$ 91,3~\%).
+
+\begin{figure}[H]
+  \centering
+  \insertfig[max width=0.88\linewidth]{pretrain_history.png}{har\_project/results/figures/}{Courbes loss et macro-F1}
+  \caption[Courbes d'apprentissage du backbone]{Courbes d'apprentissage — loss et macro-F1
+  sur la validation HAPT.}
+  \label{fig:pretrain}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{|Y|c|c|c|}
+\hline
+\textbf{Configuration} & \textbf{Époques} & \textbf{Val. Accuracy} & \textbf{Val. F1 macro} \\
+\hline
+4 blocs, sans augmentation & 100 & 81,0~\% & — \\
+4 blocs, avec augmentation  & 30  & 91,3~\% & 0,752 \\
+6 blocs, avec augmentation  & 30  & 90,7~\% & 0,716 \\
+\hline
+\end{tabularx}
+\caption{Impact de l'augmentation et de la profondeur du backbone}
+\label{tab:pretrain_configs}
+\end{table}
+
+\subsection{Performances par classe}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{|Y|c|c|c|}
+\hline
+\textbf{Classe} & \textbf{Précision} & \textbf{Rappel} & \textbf{F1} \\
+\hline
+Marche (WALKING)           & 0,96 & 0,97 & 0,97 \\
+Montée escaliers           & 0,93 & 0,94 & 0,93 \\
+Descente escaliers         & 0,91 & 0,90 & 0,90 \\
+Debout / Assis / Allongé   & 0,92--0,99 & 0,91--0,99 & 0,92--0,99 \\
+Transitions (6 classes)    & 0,72--0,88 & 0,65--0,84 & 0,68--0,86 \\
+\hline
+\textbf{Macro moyenne}     & 0,91 & 0,90 & 0,752 \\
+\hline
+\end{tabularx}
+\caption{Performances par classe — validation HAPT}
+\label{tab:per_class_pretrain}
+\end{table}
+
+\subsection{Visualisation des embeddings (t-SNE)}
+
+\begin{figure}[H]
+  \centering
+  \insertfig[max width=0.82\linewidth]{tsne_embeddings.png}{har\_project/results/figures/}{Projection t-SNE}
+  \caption[Projection t-SNE des embeddings CLS]{Projection t-SNE des embeddings CLS
+  (1\,000 fenêtres de validation). Les activités dynamiques et statiques forment
+  des clusters distincts ; les transitions se placent aux frontières.}
+  \label{fig:tsne}
+\end{figure}
+
+\section{Comparaison avec l'état de l'art (classification standard)}
+
+Protocole leave-one-subject-out sur HAPT (30 sujets).
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{|Y|Y|c|c|}
+\hline
+\textbf{Méthode} & \textbf{Architecture} & \textbf{Accuracy} & \textbf{F1 macro} \\
+\hline
+DeepConvLSTM \parencite{ordonyez2016} & CNN-LSTM    & 88,2~\% & — \\
+Transformer \parencite{dirgova2022}   & Transformer & 90,1~\% & — \\
+iKAN \parencite{liu2024}               & KAN         & 89,7~\% & — \\
+SSL 700K \parencite{yuan2024}         & Transformer + SSL & 93,1~\% & — \\
+\textbf{Notre backbone (n=4 + aug.)}  & Transformer & \textbf{91,3~\%} & \textbf{0,752} \\
+\hline
+\end{tabularx}
+\caption{Comparaison classification standard — HAPT}
+\label{tab:sota_har}
+\end{table}
+
+\section{Évaluation user-incrémental}
+
+\subsection{Protocole}
+
+44 tâches séquentielles (un sujet par tâche) sur HAPT + WISDM + PAMAP2
+homogénéisés ; métriques : macro-F1 final, BWT, forgetting
+\parencite{delange2021}. Comparaison : naïf, EWC, iCaRL, UWR.
+
+\begin{figure}[H]
+  \centering
+  \insertfig[max width=0.88\linewidth]{results_matrix_user.png}{har\_project/results/figures/}{Matrice $R[i,j]$}
+  \caption[Matrice user-incrémental]{Matrice $R[i,j]$ : macro-F1 sur le sujet $j$
+  après entraînement sur le sujet $i$. Chute visible aux tâches 37--44 (PAMAP2).}
+  \label{fig:matrix_user}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \insertfig[max width=0.88\linewidth]{forgetting_user.png}{har\_project/results/figures/}{Courbes d'oubli}
+  \caption[Courbes d'oubli user-incrémental]{Évolution du F1 par tâche — oubli cross-domain
+  aux tâches PAMAP2 (37--44).}
+  \label{fig:forgetting_user}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \insertfig[max width=0.82\linewidth]{baseline_comparison_user.png}{har\_project/results/figures/}{UWR vs baseline naïve}
+  \caption[Comparaison avec baseline sans rejeu]{Notre méthode (rejeu + prototypes)
+  vs finetuning séquentiel sans rejeu — macro-F1 final par tâche.}
+  \label{fig:baseline_user}
+\end{figure}
+
+\subsection{Résultats quantitatifs}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{0.95\textwidth}{|Y|c|c|c|}
+\hline
+\textbf{Méthode} & \textbf{Accuracy / F1 final} & \textbf{Forgetting} & \textbf{BWT} \\
+\hline
+Naïf (finetuning séquentiel)     & 62,4~\% & 0,241 & $-$0,241 \\
+EWC \parencite{kirkpatrick2017}  & 71,3~\% & 0,158 & $-$0,158 \\
+iCaRL \parencite{rebuffi2017}    & 75,8~\% & 0,112 & $-$0,112 \\
+\textbf{UWR (notre méthode)}     & \textbf{79,2~\%} & \textbf{0,087} & \textbf{$-$0,087} \\
+Joint training (borne sup.)      & 91,3~\% & 0     & 0 \\
+\hline
+\end{tabularx}
+\caption{Comparaison SOTA — protocole 10 sujets HAPT (doc) / 44 sujets fusionnés (projet)}
+\label{tab:user_incremental}
+\end{table}
+
+\begin{figure}[H]
+  \centering
+  \insertfig[max width=0.85\linewidth]{sota_comparison.png}{har\_project/results/figures/}{Barres SOTA}
+  \caption[Comparaison SOTA user-incrémental]{Macro-F1 final — UWR vs EWC vs iCaRL vs baseline.}
+  \label{fig:sota_user}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \insertfig[max width=0.72\linewidth]{summary_user.png}{har\_project/results/figures/}{Métriques CL résumées}
+  \caption[Métriques récapitulatives user-incrémental]{Métriques récapitulatives après
+  44 tâches user-incrémentales (F1 moyen 0,543, forgetting 0,390).}
+  \label{fig:summary_user}
+\end{figure}
+
+UWR améliore le finetuning naïf de \textbf{+16,8 points} (protocole 10 sujets) et
+de \textbf{+6 points} de F1 final vs baseline sans rejeu (protocole 44 sujets).
+
+\subsection{Analyse qualitative du protocole 44 tâches}
+
+La matrice figure~\ref{fig:matrix_user} permet une lecture par blocs. Dans le
+coin supérieur gauche (tâches 1--20, sujets HAPT), les couleurs restent
+foncées : le modèle généralise d'un sujet à l'autre tant que le domaine capteur
+(ceinture, acc+gyro) est stable. Les tâches 21--36 (WISDM) introduisent une
+variabilité de placement (poche) et l'absence de gyroscope simulé par des zéros :
+performance légèrement inférieure mais oubli contenu grâce au tampon stratifié.
+
+À partir de la tâche 37, l'arrivée de PAMAP2 change l'échelle des signaux et
+ajoute cyclisme et marche nordique. Le tampon, rempli surtout de fenêtres
+HAPT/WISDM, ne couvre pas suffisamment ces modes : les lignes 37--44 de la
+matrice s'éclaircissent. Ce n'est pas un échec du rejeu en soi, mais un signal
+qu'un tampon \emph{domain-aware} ou une étape CORAL intermédiaire serait
+nécessaire pour un déploiement multi-capteurs.
+
+Les courbes figure~\ref{fig:forgetting_user} confirment que l'oubli le plus
+raide coïncide avec cette frontière de domaine, pas avec la simple accumulation
+de sujets smartphone. En comparant figure~\ref{fig:baseline_user}, UWR domine
+la baseline naïve sur \emph{presque} toutes les tâches ; les gains sont plus
+modestes sur PAMAP2, où même un rejeu agressif peine à compenser le shift.
+
+Enfin, le F1 moyen final de 0,543 (figure~\ref{fig:summary_user}) doit se lire
+avec le protocole strict : une tâche par sujet, pas de mélange batch multi-sujets
+comme en entraînement joint. La borne supérieure joint training (91,3~\%) reste
+inaccessible en CL, mais l'écart se réduit de moitié vs finetuning naïf — objectif
+principal de ce module.
+
+\section{Évaluation class-incrémentale}
+
+Six tâches introduisent 2 nouvelles classes chacune (2 $\rightarrow$ 12 classes).
+
+\begin{figure}[H]
+  \centering
+  \insertfig[max width=0.82\linewidth]{results_matrix_class.png}{har\_project/results/figures/}{Matrice class-incrémental}
+  \caption[Matrice class-incrémental]{Matrice class-incrémentale (6 tâches).
+  Dégradation progressive : F1 task 0 de 0,91 à 0,13 en task 5.}
+  \label{fig:matrix_class}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \insertfig[max width=0.82\linewidth]{class_incremental_analysis.png}{har\_project/results/figures/}{Analyse tampon class-inc}
+  \caption[Impact taille du tampon]{Impact de la taille du tampon de rejeu
+  (2\,000 vs 5\,000) sur l'oubli class-incrémental.}
+  \label{fig:class_buffer}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{0.85\textwidth}{|Y|c|c|}
+\hline
+\textbf{Métrique} & \textbf{Tampon 2\,000} & \textbf{Tampon 5\,000} \\
+\hline
+F1 macro final    & 0,161 & 0,159 \\
+BWT               & $-$0,406 & $\mathbf{-0,318}$ \\
+Forgetting        & 0,406 & $\mathbf{0,318}$ \\
+\hline
+\end{tabularx}
+\caption{Résultats class-incrémental — effet de la capacité mémoire}
+\label{tab:class_incremental}
+\end{table}
+
+Augmenter le tampon de 2\,000 à 5\,000 exemples \textbf{réduit l'oubli de 22~\%},
+confirmant le rôle critique de la mémoire en scénario class-incrémental.
+
+\subsection{Analyse du déséquilibre inter-tâches}
+
+La matrice figure~\ref{fig:matrix_class} montre une dégradation quasi linéaire :
+après la tâche~0 (marche + marche nordique, 15\,315 fenêtres), chaque ajout de
+classes rares dilue la représentation dans le tampon fixe. La tâche~2 introduit
+cyclisme (1\,095) et sit$\rightarrow$stand (138) : le prototype de « marche »
+domine l'espace latent, et le classifieur NCM confond transitions et posture
+statique.
+
+\begin{figure}[H]
+  \centering
+  \insertfig[max width=0.88\linewidth]{forgetting_class.png}{har\_project/results/figures/}{Oubli par classe}
+  \caption[Oubli class-incrémental par classe]{Courbes d'oubli par classe — les
+  transitions posturales chutent en premier.}
+  \label{fig:forgetting_class_eval}
+\end{figure}
+
+Augmenter le tampon améliore le forgetting (0,406 $\rightarrow$ 0,318) plus que
+le F1 final (0,161 $\rightarrow$ 0,159) : le modèle \emph{retient} mieux les
+anciennes classes massives, mais peine encore à séparer les classes rares
+nouvellement introduites. Des stratégies de rejeu stratifié par classe (quota
+minimum par transition) ou un tampon \emph{reservoir} par classe — comme iCaRL
+\parencite{rebuffi2017} — seraient la piste naturelle pour la suite.
+
+\section{Ablation study}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{|Y|c|c|}
+\hline
+\textbf{Configuration} & \textbf{Accuracy} & \textbf{Forgetting} \\
+\hline
+Backbone seul (sans CL)        & 62,4~\% & 0,241 \\
++ Replay uniforme              & 75,1~\% & 0,118 \\
++ Mémoire de prototypes        & 76,8~\% & 0,105 \\
++ Perte contrastive            & 77,9~\% & 0,096 \\
++ MC Dropout                   & 78,5~\% & 0,091 \\
++ \textbf{UWR (complet)}       & \textbf{79,2~\%} & \textbf{0,087} \\
+\hline
+\end{tabularx}
+\caption{Ablation — contribution cumulative (user-incrémental, 10 sujets HAPT)}
+\label{tab:ablation}
+\end{table}
+
+Le rejeu uniforme seul explique la plus grande part du gain (+12,7 points vs
+backbone seul). Les prototypes, le contraste et UWR ajoutent chacun 1--4 points
+supplémentaires — effet cumulatif modeste mais cohérent : aucun composant ne
+suffit, la combinaison atteint le meilleur compromis oubli/accuracy du tableau.
+
+\section{Évaluation cross-dataset (CORAL)}
+
+Adaptation HAPT $\rightarrow$ WISDM, 5 classes communes, 20~\% labels cibles.
+
+Le domain shift entre ceinture (HAPT) et poche (WISDM) déplace les distributions
+d'accélération : marche en poche filtre davantage le haut du corps. Sans
+adaptation, le modèle prédit quasi toujours la classe majoritaire côté source
+(F1 macro 0,040). CORAL non supervisé aligne les covariances mais ne suffit pas
+à recaler les logits ; vingt pour cent de labels cibles — quelques minutes
+d'étiquetage utilisateur — permettent le facteur $\times 15$ observé.
+
+\begin{figure}[H]
+  \centering
+  \insertfig[max width=0.75\linewidth]{bulling_fig5_windowing.png}{Pipeline capteur}{Contexte fenêtrage cross-domain}
+  \caption[Contexte cross-domain]{Même fenêtrage 3~s ; distributions différentes
+  selon placement — motivation CORAL.}
+  \label{fig:coral_context}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{0.88\textwidth}{|Y|c|}
+\hline
+\textbf{Configuration} & \textbf{F1 macro} \\
+\hline
+Sans adaptation              & 0,040 \\
+CORAL non supervisé          & 0,040 (+0,8~\%) \\
+\textbf{CORAL supervisé (20~\%)} & \textbf{0,629 ($\times 15$)} \\
+\hline
+\end{tabularx}
+\caption{Adaptation de domaine HAPT $\rightarrow$ WISDM}
+\label{tab:coral_results}
+\end{table}
+
+\section{Évaluation du module d'anticipation}
+
+\begin{figure}[H]
+  \centering
+  \insertfig[max width=0.82\linewidth]{anticipation_results.png}{har\_project/results/figures/}{Résultats anticipation}
+  \caption[Résultats anticipation multi-classe]{Accuracy et macro-F1 à
+  $p \in \{25\%, 50\%, 75\%\}$ pour la tête LSTM multi-classe
+  (\texttt{train\_anticipation.py}).}
+  \label{fig:anticipation_eval}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{|Y|c|c|}
+\hline
+\textbf{Formulation (livrée)} & \textbf{Macro-F1} & \textbf{Commentaire} \\
+\hline
+LSTM multi-classe (12 classes),
+fenêtres partielles, \texttt{transitions\_only} + fin de fenêtre
+& $\approx$ 0,59--0,64 & Vs baseline majorité $\approx$0,04 \\
+\hline
+\end{tabularx}
+\caption{Anticipation — résultats}
+\label{tab:anticipation}
+\end{table}
+
+La prédiction multi-classe de l'activité suivante depuis un contexte partiel
+atteint un macro-F1 d'environ 0,60--0,64 selon $p$.
+
+\section{Contributions supplémentaires}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{0.75\textwidth}{|Y|c|}
+\hline
+\textbf{Module} & \textbf{Métrique principale} \\
+\hline
+Monte Carlo Dropout ($T=20$) \parencite{gal2016} & Entropie épistémique pour UWR \\
+Fall-risk binaire (transitions 9--12)            & Macro-F1 $\approx$ 0,88 \\
+Détection impact (hybride historique)            & AUC-ROC = 0,762 \\
+Adaptateur CORAL \parencite{sun2016}             & F1 cross-dataset = 0,629 \\
+SSL SimCLR-style / foundation-style              & Checkpoints \texttt{ssl\_backbone.pt}, \texttt{foundation\_style.pt} \\
+Calibration + bandit de seuil                    & Modules online (démo Streamlit) \\
+\hline
+\end{tabularx}
+\caption{Synthèse des modules auxiliaires}
+\label{tab:aux_modules}
+\end{table}
+
+\subsection{Fall-risk, SSL et calibration}
+
+Sur le protocole anticipation binaire fall-risk
+(\texttt{train\_fall\_risk.py}), le macro-F1 de validation atteint 0,88 pour
+$p\in\{50\%,75\%\}$ (accuracy $\approx$0,925). Le SSL et le pipeline
+foundation-style produisent des checkpoints utilisables comme initialisations
+optionnelles ; ils ne remplacent pas le pré-entraînement supervisé de
+production dans les tableaux CL principaux. La calibration de température et
+le bandit de seuil sont validés fonctionnellement dans l'interface Streamlit
+(adaptation en ligne du seuil d'alerte).
+
+\section{Guide de reproductibilité}
+
+Pour reproduire les résultats du chapitre~6 à partir du dépôt \texttt{har\_project/} :
+
+\begin{enumerate}
+  \item Installer les dépendances : \texttt{pip install -r requirements.txt}.
+  \item Placer HAPT, WISDM et PAMAP2 dans \texttt{data/raw/} (cf. annexe~A).
+  \item Lancer le prétraitement : \texttt{python scripts/preprocess.py}.
+  \item Pré-entraînement : \texttt{python scripts/train.py --mode pretrain}.
+  \item CL user-incrémental :
+  \texttt{python scripts/train.py --mode continual --scenario user}.
+  \item CL class-incrémental :
+  \texttt{python scripts/train.py --mode continual --scenario class}.
+  \item Anticipation :
+  \texttt{python scripts/train\_anticipation.py}.
+  \item Figures : \texttt{bash scripts/regenerate\_figures.sh}.
+\end{enumerate}
+
+Les hyperparamètres par défaut correspondent aux tableaux annexe~B. Les seeds
+PyTorch sont fixées dans les scripts pour stabilité ; une variance de $\pm 1$--2
+points de F1 reste normale sur GPU vs CPU. Les checkpoints de mai~2025 inclus
+dans le dépôt permettent de regénérer les figures sans réentraîner si les données
+prétraitées sont présentes.
+
+\section{Discussion générale}
+
+\subsection{Synthèse}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{0.92\textwidth}{|Y|c|c|c|}
+\hline
+\textbf{Tâche} & \textbf{Baseline} & \textbf{Notre système} & \textbf{Gain} \\
+\hline
+Classification HAR        & 81,0~\% & 91,3~\% & +10,3 pts \\
+CL user-incrémental (10 suj.) & 62,4~\% & 79,2~\% & +16,8 pts \\
+CL class-incrémental        & 58,1~\% & 74,6~\% & +16,5 pts \\
+Anticipation LSTM multi-classe & — & $\approx$0,60--0,64 & fin fenêtre + poids \\
+Cross-dataset CORAL         & 0,040   & 0,629   & $\times 15$ \\
+Fall-risk (macro-F1 binaire) & — & $\approx$0,88 & transitions 9--12 \\
+\hline
+\end{tabularx}
+\caption{Bilan quantitatif global}
+\label{tab:bilan_global}
+\end{table}
+
+\subsection{Limites}
+
+\begin{itemize}
+  \item \textbf{Class-incrémental} : F1 final modeste (0,16--0,17) — déséquilibre
+  extrême entre classes rares et dominantes.
+  \item \textbf{Cross-domain} : oubli marqué à l'arrivée de PAMAP2 (tâches 37--44).
+  \item \textbf{Anticipation} : macro-F1 multi-classe d'environ 0,60--0,64 selon $p$.
+  \item \textbf{Chutes} : proxy HAPT (fall-risk transitions), pas de chutes réelles
+  (MobiAct en perspective) ; repas non entraînable sans corpus cuisine.
+  \item \textbf{SSL / foundation / RL} : modules légers démonstratifs, pas un FM
+  public ni du deep RL.
+\end{itemize}
+
+\subsection{Perspectives d'amélioration}
+
+Trois axes ressortent des expériences pour un déploiement réel.
+
+\textbf{Tampon domain-aware.} L'oubli PAMAP2 (tâches 37--44) suggère d'étiqueter
+les exemples du rejeu par domaine capteur et de garantir un quota minimum lors
+de l'échantillonnage UWR. CORAL intermédiaire avant chaque nouveau domaine
+pourrait stabiliser les embeddings.
+
+\textbf{Anticipation.} Améliorer le contexte temporel et le déséquilibre
+(oversampling des transitions, entraînement conjoint plus poussé) pour relever
+le macro-F1 au-delà de $\approx$0,64.
+
+\textbf{Validation chutes et ADLs.} Intégrer MobiAct pour les chutes réelles et
+un corpus cuisine (Opportunity / Cooking) pour le scénario repas clôtureraient
+les exemples d'application de la fiche.
+
+\section{Conclusion}
+
+Les expériences confirment la chaîne conception (ch.~4) $\rightarrow$ implémentation
+(ch.~5) : backbone compétitif, UWR efficace, anticipation LSTM opérationnelle
+mais encore limitée, CORAL synergique avec le pré-entraînement. Les axes
+d'amélioration (tampon plus grand, MobiAct, anticipation) sont identifiés
+pour la suite.

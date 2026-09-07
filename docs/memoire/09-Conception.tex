@@ -1,0 +1,550 @@
+\part{Contribution et Évaluation}
+
+\chapter{Conception de la solution}
+\label{ch:09-Conception}
+
+\section{Introduction}
+
+La conception d'un système intelligent de reconnaissance d'activités humaines capable de s'adapter continuellement aux évolutions de son environnement constitue le cœur de ce travail. Les chapitres précédents ont mis en évidence deux insuffisances majeures des approches classiques : d'une part, leur incapacité à maintenir leurs performances face à l'arrivée de nouveaux utilisateurs ou de nouvelles activités sans réentraîner le modèle depuis le début — phénomène connu sous le nom d'oubli catastrophique — et d'autre part, leur caractère purement réactif, se limitant à reconnaître une activité en cours sans anticiper les transitions imminentes.
+
+Pour répondre à ces défis, nous proposons une architecture articulée autour d'un
+backbone Transformer partagé et de deux modules spécialisés : un module de
+reconnaissance continue, fondé sur un tampon de rejeu pondéré par l'incertitude
+épistémique (UWR), et un module d'anticipation multi-classe (tête LSTM) qui
+prédit l'activité suivante à partir de fenêtres partielles. Cette conception
+tire parti des représentations apprises par le Transformer pour alimenter
+simultanément la reconnaissance adaptative et la prédiction temporelle.
+
+Ce chapitre est organisé comme suit. La section 4.2 formalise le problème et définit les scénarios d'apprentissage retenus ainsi que les contraintes de déploiement. La section 4.3 énonce les objectifs et contributions principales du projet. La section 4.4 présente les jeux de données utilisés et le pipeline d'homogénéisation. La section 4.5 décrit l'architecture globale du système. Les sections 4.6 et 4.7 détaillent respectivement la conception du module de reconnaissance continue et du module d'anticipation. Enfin, la section 4.8 définit le protocole d'évaluation.
+
+\section{Définition et formulation du problème}
+
+\subsection{Cadre formel et scénarios retenus}
+
+\subsubsection{Formulation générale}
+
+Soit $\mathcal{S} = \{(x_1, y_1), (x_2, y_2), \ldots\}$ un flux de données IMU non stationnaire, où chaque observation $x_t \in \mathbb{R}^{T \times C}$ est une fenêtre temporelle de $T = 150$ échantillons sur $C = 6$ canaux (accélération triaxiale $a_x, a_y, a_z$ et vitesse angulaire triaxiale $\omega_x, \omega_y, \omega_z$), et $y_t \in \mathcal{Y}$ est l'étiquette d'activité associée. Le flux est non stationnaire en ce sens que la distribution jointe $p(x, y)$ évolue au cours du temps, soit en raison de l'apparition de nouveaux utilisateurs aux habitudes motrices distinctes, soit en raison de l'introduction de nouvelles classes d'activités.
+
+L'objectif général est d'entraîner un modèle $f_\theta : \mathbb{R}^{T \times C} \to \mathcal{Y}$ qui maintient des performances élevées sur l'ensemble des distributions rencontrées, sans accéder à l'intégralité des données historiques lors de chaque mise à jour, et sous contrainte mémoire bornée.
+
+\subsubsection{Scénario 1 — Apprentissage incrémental par utilisateurs}
+
+Dans ce scénario, les données arrivent par blocs correspondant à des utilisateurs distincts $\mathcal{U} = \{u_1, u_2, \ldots, u_K\}$. Les classes d'activités restent fixes ($\mathcal{Y}$ constant), mais la distribution conditionnelle $p(x \mid y, u)$ varie d'un utilisateur à l'autre en raison des différences morphologiques, de placement du capteur et de style de mouvement. Le modèle doit, après avoir appris sur l'utilisateur $u_k$, conserver ses performances sur tous les utilisateurs précédents $u_1, \ldots, u_{k-1}$ sans y avoir accès, tout en s'adaptant efficacement au nouvel utilisateur $u_k$.
+
+Ce scénario correspond à la situation de déploiement la plus fréquente dans les applications de santé connectée : un même modèle installé sur un dispositif est progressivement personnalisé pour de nouveaux porteurs.
+
+\subsubsection{Scénario 2 — Apprentissage incrémental par classes}
+
+Dans ce scénario, les données arrivent par blocs correspondant à des tâches $\mathcal{T} = \{T_1, T_2, \ldots, T_N\}$, chaque tâche $T_k$ introduisant un sous-ensemble de nouvelles classes $\mathcal{Y}_k$ tel que $\mathcal{Y}_i \cap \mathcal{Y}_j = \emptyset$ pour $i \neq j$ et $\mathcal{Y} = \bigcup_{k=1}^{N} \mathcal{Y}_k$. Le modèle doit, à chaque tâche $k$, apprendre à reconnaître les nouvelles classes tout en maintenant la discrimination des classes des tâches précédentes. Ce scénario est formellement le plus difficile car il exige une expansion dynamique de l'espace de sortie.
+
+Conformément à la taxonomie de \parencite{vdven2022}, l'identifiant de tâche n'est pas fourni au modèle lors de l'inférence (test sans oracle de tâche), ce qui constitue la configuration la plus réaliste.
+
+\subsection{Contraintes de déploiement}
+
+Le système est conçu pour un déploiement sur dispositifs embarqués à ressources contraintes, comme les smartphones et les montres connectées. Les contraintes suivantes sont imposées tout au long de la conception :
+
+Contrainte mémoire. Le tampon de rejeu est borné à $M = 2000$ exemples au maximum, représentant moins de 4 \% du jeu d'entraînement total. Cette contrainte modélise la limitation de la mémoire vive disponible sur un dispositif mobile.
+
+Contrainte temporelle. Le délai d'inférence doit rester compatible avec un usage
+temps réel. Nous fixons comme \emph{objectif de conception} de traiter une
+fenêtre de 3~secondes en moins de 150~ms sur CPU, ce qui exclut les
+architectures trop profondes ou les inférences multi-passes coûteuses en
+production (cette latence n'est pas une mesure expérimentale reportée ici).
+
+Contrainte d'accès aux données. Lors de l'apprentissage d'une nouvelle tâche, le modèle n'a accès qu'aux données de la tâche courante et au contenu de son tampon de rejeu. Aucun accès aux données brutes des tâches passées n'est autorisé, conformément aux hypothèses standard de l'apprentissage continu.
+
+Contrainte de stabilité. Les mises à jour du modèle doivent être incrémentales et ne pas dégrader significativement les performances sur les tâches précédentes. Le taux d'oubli toléré est défini comme une dégradation de moins de 5 points de F1 macro par rapport aux performances initiales sur chaque tâche.
+
+\subsection{Positionnement par rapport à l'état de l'art}
+
+L'analyse des travaux existants présentée au Chapitre 3 révèle plusieurs lacunes que notre approche cherche à combler :
+
+Sur l'estimation d'incertitude dans le rejeu. Les méthodes existantes comme iCaRL (Rebuffi et al., 2017) utilisent une sélection d'exemples représentatifs basée sur la proximité aux prototypes de classe. Notre approche, en revanche, privilégie les exemples à forte incertitude épistémique, c'est-à-dire ceux sur lesquels le modèle est le moins sûr. Cette distinction est fondamentale : les exemples proches des frontières de décision apportent plus d'information pour maintenir ces frontières lors des futures mises à jour.
+
+Sur l'anticipation d'activités pour la HAR. La majorité des travaux d'anticipation
+en HAR traitent le problème comme une prédiction multi-classes de l'activité
+suivante (Ryoo, 2011 ; Gammulle et al., 2019). C'est aussi la formulation
+retenue ici : une tête LSTM prédit la classe suivante depuis une séquence de
+fenêtres partielles, en ne retenant que les paires où le label change
+(\texttt{transitions\_only}). Cette tâche souffre d'un déséquilibre sévère ;
+les résultats (chapitre~6) montrent un macro-F1 proche du hasard.
+
+Sur l'adaptation de domaine avec backbone pré-entraîné. Les travaux sur CORAL (Sun \& Saenko, 2016) appliquent l'alignement de covariance soit sur des représentations de bas niveau, soit sur des modèles entraînés de zéro. Nous montrons que l'application de CORAL sur les embeddings d'un Transformer pré-entraîné amplifie significativement les gains, notamment en présence d'étiquettes cibles partielles.
+
+\section{Objectifs du projet et contributions principales}
+
+Ce projet poursuit cinq objectifs principaux :
+
+Objectif 1 : Backbone universel pour la HAR. Concevoir et entraîner un encodeur Transformer léger, capable de produire des embeddings de haute qualité à partir de signaux IMU bruts, transférables à toutes les tâches en aval.
+
+Objectif 2 : Apprentissage continu robuste. Développer un mécanisme de gestion de la mémoire et d'entraînement incrémental permettant de maintenir les performances sur les tâches passées tout en assimilant efficacement les nouvelles, dans les deux scénarios définis.
+
+Objectif 3 : Anticipation temps réel. Proposer un module d'anticipation opérationnel en temps réel, capable de détecter les transitions imminentes d'activité avec une précision et un rappel suffisants pour des applications de sécurité (détection de chute imminente, surveillance de personnes âgées).
+
+Objectif 4 : Adaptation cross-dataset. Évaluer la capacité du système à se transférer d'un dataset source à un dataset cible de distribution différente, avec et sans annotations cibles, via l'alignement de covariance CORAL.
+
+Objectif 5 : Détection de chutes hybride. Intégrer un module complémentaire de détection de chutes combinant règles physiques et classification apprise, démontrant la généricité de l'architecture proposée.
+
+Les contributions scientifiques et techniques originales de ce travail sont :
+
+(C1) Uncertainty-Weighted Replay (UWR) : stratégie de sélection et d'échantillonnage d'exemples dans le tampon de rejeu basée sur l'incertitude épistémique estimée par Monte Carlo Dropout. À notre connaissance, c'est la première application de cette stratégie au contexte HAR continu.
+
+(C2) Module d'anticipation multi-classe sur fenêtres partielles : tête LSTM
+entraînée sur le backbone gelé, contexte $S=5$ fenêtres tronquées à
+$p\in\{0{,}25,0{,}50,0{,}75\}$, filtrage \texttt{transitions\_only}, perte
+cross-entropie.
+
+(C3) Évaluation multi-dataset de l'apprentissage continu : protocole d'évaluation rigoureux couvrant deux scénarios, plusieurs baselines, et une mesure explicite de l'oubli (BWT) et du transfert (FWT).
+
+(C4) Adaptation CORAL avec backbone pré-entraîné : démonstration que l'alignement de covariance supervisé sur les embeddings d'un Transformer pré-entraîné produit un gain de ×15 par rapport à l'absence d'adaptation.
+
+\section{Données : homogénéisation et pipeline}
+
+\subsection{Datasets retenus et leurs caractéristiques}
+
+HAPT — UCI HAR with Postural Transitions
+
+Le dataset HAPT (Reyes-Ortiz et al., 2016) est une extension du dataset UCI HAR qui inclut explicitement les transitions posturales entre activités statiques. Il comprend 30 sujets adultes (âge : 19–48 ans), équipés d'un smartphone Samsung Galaxy S2 fixé à la ceinture. Les données sont acquises à 50 Hz via l'accéléromètre et le gyroscope triaxiaux. Le dataset distingue 12 classes : 6 activités de base (marche, montée d'escaliers, descente d'escaliers, position debout, assis, allongé) et 6 transitions posturales (debout-vers-assis, assis-vers-debout, assis-vers-allongé, allongé-vers-assis, debout-vers-allongé, allongé-vers-debout).
+
+Après application du pipeline de prétraitement décrit en §4.4.2, on obtient 56 861 fenêtres d'entraînement et de test, avec une distribution de classes déséquilibrée : les activités statiques représentent environ 45 \% des fenêtres, les activités dynamiques 42 \%, et les transitions posturales seulement 13 \%.
+
+WISDM — Wireless Sensor Data Mining
+
+Le dataset WISDM (Kwapisz et al., 2011) a été collecté auprès de 51 sujets portant leur smartphone en poche. La fréquence d'acquisition est de 20 Hz (rééchantillonnée à 50 Hz dans notre pipeline). Il couvre 6 activités : marche, jogging, montée d'escaliers, descente d'escaliers, assis, debout. Ce dataset est exclusivement utilisé dans les expériences d'adaptation de domaine, jouant le rôle du domaine cible dont on cherche à aligner la distribution sur HAPT (domaine source).
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{0.92\textwidth}{|Y|c|c|}
+\hline
+\textbf{Propriété} & \textbf{HAPT} & \textbf{WISDM} \\
+\hline
+Sujets                    & 30  & 51 \\
+Classes                   & 12  & 6 \\
+Fréquence originale       & 50 Hz & 20 Hz (rééchant. 50 Hz) \\
+Placement                 & Ceinture & Poche \\
+Fenêtres (après prétrait.) & $\sim$56\,861 & $\sim$17\,000 \\
+Déséquilibre max.         & $\times 3{,}4$ & $\times 2{,}1$ \\
+\hline
+\end{tabularx}
+\caption{Comparaison des caractéristiques HAPT et WISDM}
+\label{tab:hapt_wisdm}
+\end{table}
+
+\subsection{Pipeline de prétraitement}
+
+Le pipeline de prétraitement suit les recommandations d'Amrani et al. (2025) pour l'homogénéisation de datasets IMU hétérogènes. Il comprend les étapes suivantes, implémentées dans le module preprocessing.py :
+
+Étape 1 — Rééchantillonnage à 50 Hz. Pour les signaux dont la fréquence d'acquisition diffère de 50 Hz (cas de WISDM à 20 Hz), un rééchantillonnage par méthode de Fourier (scipy.signal.resample) est appliqué. Cette méthode préserve le contenu fréquentiel du signal tout en modifiant sa résolution temporelle.
+
+Étape 2 — Suppression de la composante gravitationnelle. La gravité terrestre ($g \approx 9{,}81$ m/s²) est présente dans les mesures accéléromètre et constitue un biais qui varie selon l'orientation du capteur. Elle est estimée par un filtre passe-bas Butterworth d'ordre 5, de fréquence de coupure 0,5 Hz, appliqué sur chaque canal accéléromètre. La composante gravitationnelle ainsi estimée est soustraite du signal brut, isolant la composante dynamique pure liée au mouvement.
+
+Étape 3 — Segmentation par fenêtre glissante. Le signal continu est découpé en fenêtres de $T = 150$ échantillons (équivalant à 3 secondes à 50 Hz) avec un chevauchement de 50 \% (stride $s = 75$ échantillons). Cette configuration est standard dans la littérature HAR et permet d'obtenir un bon compromis entre la résolution temporelle et la quantité de données. L'étiquette de chaque fenêtre est déterminée par vote majoritaire sur les étiquettes échantillon-par-échantillon de la fenêtre.
+
+Étape 4 — Normalisation z-score par sujet. Pour chaque sujet, la moyenne et l'écart-type de chaque canal sont calculés sur l'ensemble de ses données d'entraînement. La normalisation est ensuite appliquée fenêtre par fenêtre, ramenant chaque canal à une distribution centrée-réduite. Cette normalisation par sujet, plutôt que globale, réduit les biais inter-sujets dus aux différences de calibration des capteurs.
+
+\subsection{Unification des classes}
+
+Pour les expériences d'adaptation de domaine cross-dataset (HAPT → WISDM), un mapping manuel est établi entre les classes des deux datasets en conservant uniquement les 5 activités communes : marche (HAPT: classe 1, WISDM: classe 1), montée d'escaliers (HAPT: 2, WISDM: 3), descente d'escaliers (HAPT: 3, WISDM: 4), assis (HAPT: 4, WISDM: 5), debout (HAPT: 5, WISDM: 6). Les transitions posturales spécifiques à HAPT et le jogging spécifique à WISDM sont exclus de ces expériences. Le mapping garantit une correspondance sémantique stricte entre les classes source et cible.
+
+\section{Architecture générale du système}
+
+\subsection{Vue d'ensemble}
+
+L'architecture proposée est structurée autour d'un backbone partagé de type Transformer et de deux modules spécialisés branchés en aval. Cette organisation permet de mutualiser l'apprentissage des représentations générales du mouvement tout en permettant à chaque module d'optimiser sa tâche spécifique de manière indépendante.
+
+Le flux de traitement global est le suivant : une fenêtre IMU brute $(T=150, C=6)$ est d'abord encodée par le backbone en un vecteur d'embedding de dimension $d=128$. Cet embedding est ensuite transmis soit au Module~1 (reconnaissance continue) pour la classification et la mise à jour incrémentale, soit au Module~2 (anticipation) pour la prédiction de l'activité suivante à partir de fenêtres partielles.
+
+\input{includes/tikz-har-system}
+
+\subsection{Backbone Transformer}
+
+Le backbone IMUTransformerEncoder est un encodeur Transformer pour séries temporelles multivariées, conçu spécifiquement pour les signaux IMU. Son architecture s'inspire de Dirgová et al. (2022) et comprend quatre composants principaux :
+
+Projection d'entrée. Les $C = 6$ canaux bruts sont projetés vers l'espace de représentation de dimension $d = 128$ par une couche linéaire suivie d'une normalisation de couche (LayerNorm). Cette projection est nécessaire car la dimension 6 est trop petite pour représenter des concepts abstraits de mouvement.
+
+Token CLS. Un token de classification spécial, [CLS], appris par optimisation, est prépendu à la séquence. Après passage dans tous les blocs Transformer, la représentation de ce token agrège l'information de toute la fenêtre par le mécanisme d'attention.
+
+Encodage positionnel. Des codes positionnels sinusoïdaux fixes (sin/cos à différentes fréquences) sont additionnés aux représentations après projection, permettant au modèle de connaître la position temporelle de chaque échantillon. Un facteur d'échelle appris est appliqué aux codes positionnels.
+
+Blocs Transformer. Quatre blocs Transformer encodeurs sont empilés. Chaque bloc applique, dans l'ordre : normalisation pré-couche → attention multi-têtes → connexion résiduelle → normalisation → FFN (Feed-Forward Network) → connexion résiduelle. L'attention multi-têtes utilise $H = 4$ têtes de dimension 32 chacune ($4 \times 32 = 128$). La FFN est composée de deux couches linéaires avec activation GELU et une dimension cachée de 256.
+
+La sortie du backbone est la représentation du token CLS après le dernier bloc et une normalisation finale : $\mathbf{e} = f_\theta(x) \in \mathbb{R}^{128}$.
+
+\begin{figure}[H]
+  \centering
+  \insertfig[max width=0.88\linewidth]{dirgova2022_transformer.png}{Architecture Transformer IMU \parencite{dirgova2022}}{Encodeur Transformer pour séries temporelles IMU.}
+  \caption[Architecture du backbone Transformer]{Architecture du backbone \emph{IMUTransformerEncoder}
+  inspirée de \parencite{dirgova2022} — projection, token CLS, encodage positionnel et blocs d'attention.}
+  \label{fig:backbone_transformer}
+\end{figure}
+
+Nombre total de paramètres : 531\,457, dont 118\,784 pour les blocs Transformer et 412\,673 pour les couches de projection et de classification.
+
+\subsection{Module 1 — Reconnaissance continue}
+
+Le Module 1 gère l'ensemble du cycle de vie de la reconnaissance d'activité en mode continu. Il est composé de trois sous-composants :
+
+Tête de classification : une séquence linéaire (128 → 64 → dropout(0,1) → n\_classes) utilisée lors du pré-entraînement supervisé.
+
+Mémoire de prototypes : un vecteur moyen par classe maintenu et mis à jour en ligne.
+
+Tampon de rejeu UWR : stockage borné des exemples passés, avec priorisation par incertitude épistémique.
+
+Ce module est décrit en détail en §4.6.
+
+\subsection{Module 2 — Anticipation d'activité}
+
+Le Module 2 opère sur le backbone gelé (mode standard). Il prend en entrée une
+séquence de $S=5$ fenêtres partielles, les encode via le Transformer, puis les
+agrège avec un LSTM unidirectionnel dont le dernier état alimente un
+classifieur linéaire multi-classe (\texttt{AnticipationHead}). La cible est le
+label de la fenêtre suivante ; l'entraînement filtre les transitions
+(\texttt{transitions\_only=True}).
+
+Ce module est décrit en détail en §4.7.
+
+\section{Conception du module de reconnaissance continue}
+
+\subsection{Mémoire de prototypes}
+
+Un prototype de classe $\boldsymbol{\mu}_c \in \mathbb{R}^{128}$ est associé à chaque classe $c \in \mathcal{Y}$. Il est défini comme la moyenne exponentielle mobile des embeddings des exemples de la classe $c$ observés jusqu'à l'instant courant :
+
+$$\boldsymbol{\mu}_c \leftarrow \alpha \cdot \boldsymbol{\mu}_c + (1 - \alpha) \cdot \frac{1}{|\mathcal{B}_c|} \sum_{x \in \mathcal{B}_c} f_\theta(x)$$
+
+où $\mathcal{B}_c$ est l'ensemble des exemples de classe $c$ dans le lot courant et $\alpha = 0{,}9$ est le coefficient de momentum. Cette mise à jour s'effectue après chaque pas de gradient, garantissant que les prototypes reflètent toujours les représentations du modèle courant.
+
+Lors de l'inférence continue, la classe prédite est celle dont le prototype est le plus proche en distance euclidienne de l'embedding de l'exemple test :
+
+$$\hat{y} = \arg\min_{c \in \mathcal{Y}} |\boldsymbol{e} - \boldsymbol{\mu}_c|_2$$
+
+Cette stratégie de classification par plus proche prototype présente l'avantage de ne pas nécessiter de recalibration de la tête de classification lors de l'ajout de nouvelles classes, contrairement aux approches softmax classiques.
+
+\subsection{Tampon de rejeu standard}
+
+Un tampon de capacité bornée $M = 2000$ exemples est maintenu. Sa structure est une liste circulaire qui associe à chaque exemple $(x, y)$ un score de priorité $s \in [0, 1]$ initialisé à 0,5. L'ajout d'un nouvel exemple se fait selon la stratégie de réservoir : si le tampon est plein, l'exemple est inséré avec probabilité $M / n_{total}$ en remplaçant un exemple existant tiré aléatoirement. Lors de l'entraînement, un lot de rejeu de taille $B_{replay} = 32$ est échantillonné uniformément depuis le tampon et la perte de cross-entropie est calculée sur ces exemples :
+
+$$\mathcal{L}_{\mathrm{replay}} = \mathcal{L}_{\mathrm{CE}}(f_\theta(x_{\mathrm{replay}}), y_{\mathrm{replay}})$$
+
+Cette perte de rejeu est additionnée à la perte sur le lot courant, forçant le modèle à maintenir ses prédictions sur les données passées.
+
+\subsection{Uncertainty-Weighted Replay — contribution originale}
+
+Motivation et intuition
+
+La stratégie de rejeu uniforme présente une limitation fondamentale : elle ne distingue pas les exemples faciles (bien classifiés, loin des frontières de décision) des exemples difficiles (près des frontières, source d'erreurs). Or, les frontières de décision sont précisément les régions de l'espace de représentation qui risquent de se déplacer lors de l'apprentissage de nouvelles tâches, causant ainsi l'oubli. En concentrant la mémoire sur les exemples à forte incertitude, l'UWR maximise la couverture des frontières de décision avec un budget mémoire fixe.
+
+Estimation de l'incertitude épistémique par Monte Carlo Dropout
+
+L'incertitude épistémique d'un exemple $x$ est estimée par la méthode de Monte Carlo Dropout \parencite{gal2016}. Le modèle est mis en mode entraînement (dropout actif) et $T_{\mathrm{MC}} = 20$ passages forward sont effectués sur $x$, produisant $T_{\mathrm{MC}}$ distributions softmax stochastiques $\{p_\tau(y \mid x)\}_{\tau=1}^{T_{\mathrm{MC}}}$. La distribution moyenne est calculée :
+
+$$\bar{p}(y \mid x) = \frac{1}{T_{MC}} \sum_{\tau=1}^{T_{MC}} p_\tau(y \mid x)$$
+
+L'incertitude épistémique est mesurée par l'entropie de Shannon de cette distribution moyenne :
+
+$$\mathcal{U}(x) = -\sum_{c=1}^{|\mathcal{Y}|} \bar{p}(c \mid x) \log \bar{p}(c \mid x)$$
+
+Cette mesure atteint son maximum $\log |\mathcal{Y}|$ lorsque toutes les classes sont équiprobables (incertitude maximale) et vaut 0 lorsqu'une classe est prédite avec certitude absolue.
+
+Algorithme UWR
+
+Lors de l'ajout d'un exemple au tampon : le score de priorité de l'exemple est fixé à $s(x) = \mathcal{U}(x) / \log |\mathcal{Y}|$, normalisant l'incertitude dans $[0, 1]$. Si le tampon est plein, l'exemple est inséré en remplaçant un exemple existant tiré avec probabilité inversement proportionnelle à son score de priorité (les exemples les moins incertains sont préférentiellement évincés).
+
+Lors de l'échantillonnage pour le rejeu : les exemples du tampon sont sélectionnés avec une probabilité proportionnelle à leur score de priorité, légèrement lissée par une constante $\epsilon = 0{,}1$ pour éviter la famine des exemples à faible incertitude :
+
+$$P(\text{sélectionner } x_i) \propto s(x_i) + \epsilon$$
+
+Propriétés théoriques
+
+L'UWR converge vers un tampon dont la distribution marginale est concentrée sur les exemples à forte incertitude, c'est-à-dire près des frontières de décision. Lorsque le modèle évolue et que certaines frontières se déplacent, les exemples affectés voient leur incertitude augmenter, déclenchant leur priorisation dans les futurs lots de rejeu. Ce mécanisme crée une boucle de rétroaction qui guide activement le tampon vers les zones à risque d'oubli.
+
+\subsection{Calibration adaptative en ligne (prototypes)}
+
+Après chaque pas de gradient, les prototypes de toutes les classes présentes dans le lot courant sont recalibrés. Pour une classe $c$ présente dans le lot, l'embedding moyen du lot $\bar{\boldsymbol{e}}_c = \frac{1}{|\mathcal{B}_c|}\sum_{x \in \mathcal{B}_c} f_\theta(x)$ est calculé avec les nouveaux paramètres $\theta$ mis à jour. Le prototype est ensuite mis à jour selon la formule présentée en §4.6.1. Pour les classes absentes du lot courant, les prototypes sont conservés inchangés.
+
+Cette recalibration garantit que les prototypes restent cohérents avec les représentations courantes du backbone, évitant un décalage progressif (prototype drift) qui dégraderait les performances de l'inférence par plus proche voisin.
+
+\subsection{Fonction de perte totale}
+
+La fonction de perte globale lors d'un pas d'apprentissage continu combine trois termes :
+
+$$\mathcal{L}_{\mathrm{total}} = \mathcal{L}_{\mathrm{CE}}(\mathcal{B}_{\mathrm{curr}}) + \mathcal{L}_{\mathrm{replay}}(\mathcal{B}_{\mathrm{replay}}) + \lambda_c \cdot \mathcal{L}_{\mathrm{contrast}}(\mathcal{B}_{\mathrm{curr}})$$
+
+Terme 1 — Perte de classification courante $\mathcal{L}_{\mathrm{CE}}(\mathcal{B}_{\mathrm{curr}})$ : cross-entropie sur le lot courant, assurant l'apprentissage de la tâche courante.
+
+Terme 2 — Perte de rejeu $\mathcal{L}_{\mathrm{replay}}(\mathcal{B}_{\mathrm{replay}})$ : cross-entropie sur le lot échantillonné depuis le tampon UWR, assurant la rétention des connaissances passées.
+
+Terme 3 — Perte contrastive $\mathcal{L}_{\mathrm{contrast}}(\mathcal{B}_{\mathrm{curr}})$ : perte de séparation inter-classes calculée par rapport à la mémoire de prototypes. Pour chaque exemple $(x, y)$ du lot courant, elle maximise la similarité cosinus avec le prototype de sa classe et minimise celle avec les prototypes des autres classes, avec une température $\tau = 0{,}07$ :
+
+$$\mathcal{L}_{\mathrm{contrast}}(x, y) = -\log \frac{\exp(\mathrm{sim}(\boldsymbol{e}, \boldsymbol{\mu}_y) / \tau)}{\sum_{c \neq y} \exp(\mathrm{sim}(\boldsymbol{e}, \boldsymbol{\mu}_c) / \tau)}$$
+
+Le coefficient $\lambda_c = 0{,}1$ est fixé empiriquement pour équilibrer la contribution de la perte contrastive sans dominer la dynamique d'apprentissage.
+
+\section{Conception du module d'anticipation}
+
+\subsection{Architecture LSTM sur fenêtres partielles}
+
+Le module d'anticipation prédit la \emph{classe suivante} à partir d'un
+contexte partiel. Pour un indice $i$ :
+
+\begin{itemize}
+  \item le contexte est la séquence de $S=5$ fenêtres
+  $X[i-S],\ldots,X[i-1]$, chacune tronquée aux premiers $p\,\%$
+  ($p\in\{0{,}25,0{,}50,0{,}75\}$) ;
+  \item la cible est le label $y[i]$ ;
+  \item avec \texttt{transitions\_only=True}, on ne garde l'exemple que si
+  $y[i]\neq y[i-1]$ ;
+  \item chaque fenêtre partielle est encodée par le backbone (gelé) ;
+  \item la séquence d'embeddings $(B,S,128)$ passe dans un LSTM
+  unidirectionnel (2 couches, hidden 128, dropout 0,2) ;
+  \item le dernier état alimente \texttt{LayerNorm + Linear} (logits
+  multi-classe) ;
+  \item la perte est la cross-entropie (\texttt{F.cross\_entropy}).
+\end{itemize}
+
+L'entraînement standard gèle le backbone et la tête HAR
+(\texttt{train\_anticipation.py}) ; une variante conjoint
+(\texttt{train\_anticipation\_joint.py}) adapte aussi le backbone avec un
+taux d'apprentissage réduit.
+
+\subsection{Limites de la formulation multi-classe}
+
+Avec truncature en fin de fenêtre, pondération des classes et restauration
+du meilleur checkpoint, la prédiction multi-classe atteint un macro-F1 de
+validation d'environ 0,59 ($p=25\%$), 0,63 ($p=50\%$) et 0,64 ($p=75\%$),
+contre une baseline majorité d'environ 0,04. La tâche reste non triviale
+(transitions rares, déséquilibre, split par sujet), mais nettement au-dessus
+du niveau hasard/majorité.
+
+\section{Modules complémentaires alignés sur la fiche PFE}
+
+La fiche PFE (code~26/2755) mentionne explicitement l'auto-supervision, les
+modèles de type fondation, la calibration en ligne, l'apprentissage
+séquentiel / renforcement, l'anticipation d'une perte d'équilibre et des
+exemples d'activités domestiques (repas). Cette section formalise les
+modules ajoutés pour couvrir ces orientations, avec des limites assumées.
+
+\subsection{Pré-entraînement auto-supervisé (SSL)}
+
+Avant le fine-tuning supervisé, un pré-entraînement SimCLR-style sur fenêtres
+IMU (sans labels) produit deux vues augmentées (bruit gaussien, mise à
+l'échelle canal, masquage temporel) et minimise une perte NT-Xent sur une
+tête de projection. Le backbone obtenu (\texttt{ssl\_backbone.pt}) sert
+d'initialisation optionnelle. Ce n'est pas un SSL massif type industrie
+\parencite{yuan2024}, mais une étape pragmatique compatible avec nos volumes
+de données.
+
+\subsection{Pipeline foundation-style}
+
+Par \emph{foundation-style}, nous entendons le motif
+prétrain générique $\rightarrow$ adaptation ciblée, et non l'intégration d'un
+modèle de fondation public (TimesNet, UniTS, MOMENT). Le script
+\texttt{train\_foundation\_style.py} enchaîne SSL puis fine-tune supervisé
+sur HAPT/WISDM et produit \texttt{foundation\_style.pt}. Ce checkpoint
+démontre le pattern ; le checkpoint de production reste
+\texttt{pretrained.pt} (supervisé direct).
+
+\subsection{Calibration de confiance en ligne}
+
+Outre la mise à jour des prototypes, un module
+\texttt{OnlineCalibrator} combine :
+\begin{itemize}
+  \item \texttt{OnlineTemperatureScaler} : un scalaire $T$ appris en ligne
+  (NLL sur un tampon étiqueté) pour recalibrer $\mathrm{softmax}(\ell/T)$ ;
+  \item \texttt{AdaptiveConfidenceThreshold} : seuil d'acceptation / rejet
+  ajusté dynamiquement selon la fiabilité observée.
+\end{itemize}
+Ce mécanisme répond à l'exigence fiche de \emph{calibration adaptative en ligne}
+des scores d'alerte et de classification.
+
+\subsection{Bandit de seuil (RL léger)}
+
+La fiche évoque l'apprentissage séquentiel par renforcement. Nous
+implémentons un bandit $\varepsilon$-greedy (\texttt{ThresholdBandit}) sur une
+grille de seuils de confiance d'alerte. La récompense pénalise les fausses
+alertes et récompense les vraies détections. Ce n'est pas du deep RL ; c'est
+une adaptation en ligne du seuil d'alerte, suffisante pour la démonstration
+et le couplage avec la calibration.
+
+\subsection{Anticipation du risque de chute / équilibre}
+
+Au-delà de la détection d'impact a posteriori, une tête binaire
+\texttt{FallRiskHead} (LSTM sur séquence d'embeddings) prédit si la
+\emph{prochaine} activité est une transition posturale à risque
+(labels 9--12 : stand$\leftrightarrow$sit, sit$\leftrightarrow$lie). Un
+détecteur physique heuristique (\texttt{PhysicalFallDetector}) complète la
+couche sécurité. La classe unifiée \texttt{fall} étant absente du merge
+HAPT+WISDM, nous ne prétendons pas détecter des chutes cliniques réelles ;
+MobiAct reste une perspective.
+
+\subsection{Scénario « préparation de repas »}
+
+La fiche cite la préparation d'un repas comme exemple d'activité. Aucun
+label cuisine n'existe dans HAPT/WISDM. Le module
+\texttt{adl\_scenarios.py} documente le scénario comme \emph{unavailable}
+et expose un proxy narratif UI (transitions domestiques) uniquement pour
+la démo Streamlit — à ne pas présenter comme un classifieur de repas.
+
+\section{Scénarios d'utilisation et flux de données}
+
+Cette section illustre comment les modules interagissent dans trois cas d'usage
+concrets. Les diagrammes reprennent l'architecture figure TikZ du §4.5.
+
+\subsection{Cas 1 — Personnalisation progressive (user-incrémental)}
+
+Un service de coaching sportif déploie l'application sur le smartphone de nouveaux
+utilisateurs chaque semaine. Au jour~0, le backbone pré-entraîné sur HAPT classifie
+correctement les activités génériques (marche, assis). À l'arrivée de l'utilisateur
+$u_k$, l'application collecte une vingtaine de minutes de données étiquetées (ou
+pseudo-étiquetées par interaction). Le module UWR fine-tune le modèle sur $u_k$
+pendant quelques dizaines d'époques (typiquement 10 à 50 selon la configuration
+expérimentale), remplit le tampon avec les fenêtres les plus incertaines, et
+met à jour les prototypes. L'inférence pour $u_k$ utilise le NCM sur prototypes ;
+les utilisateurs $u_1..u_{k-1}$ restent couverts grâce au rejeu. Métrique suivie :
+macro-F1 par sujet et forgetting (chapitre~6).
+
+\subsection{Cas 2 — Extension du répertoire d'activités (class-incrémental)}
+
+Un programme de rééducation ajoute de nouveaux exercices au fil des semaines
+(ex.\ équilibre sur une jambe, montée d'escaliers guidée). Chaque semaine introduit
+deux nouvelles classes. Le classifieur doit reconnaître l'ensemble des exercices
+cumulés sans oublier les premiers. Le tampon stratifié privilégie les exemplaires
+par classe ; la taille (2\,000 vs 5\,000) conditionne directement le forgetting
+(22~\% de réduction observée). Les transitions posturales HAPT modélisent ce
+déséquilibre extrême entre classes massives et classes rares.
+
+\subsection{Cas 3 — Déploiement cross-appareil (CORAL + anticipation)}
+
+Un patient quitte l'hôpital (capteur ceinture, protocole HAPT-like) et continue
+le suivi à domicile avec son téléphone en poche (distribution WISDM-like). CORAL
+supervisé sur 20~\% de sessions étiquetées à domicile aligne les embeddings avant
+fine-tuning léger. En parallèle, le module d'anticipation LSTM peut signaler
+une activité suivante probable lorsque le contexte partiel suggère une
+transition ; le détecteur hybride de chutes fusionne règles physiques et MLP.
+Ce scénario combine adaptation domaine, CL utilisateur si le patient est suivi
+longitudinalement, et anticipation / sécurité.
+
+\subsection{Contraintes temps réel rappelées}
+
+Dans les trois cas, une fenêtre de 3~s doit idéalement être inférée en moins de
+150~ms sur CPU (\emph{objectif} de conception rappelé au §4.2, non mesuré comme
+benchmark dans nos expériences). Le backbone $\approx$531~K paramètres et la
+tête d'anticipation légère sont dimensionnés pour rester compatibles avec cette
+cible ; MC Dropout ($T=20$) est réservé à l'entraînement et à la mise à jour du
+tampon, pas à chaque inférence utilisateur en production.
+
+\section{Protocole d'évaluation}
+
+\subsection{Baselines comparées}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{|Y|Y|Y|}
+\hline
+\textbf{Baseline} & \textbf{Description} & \textbf{Référence} \\
+\hline
+Naïf (Finetuning) & Entraînement séquentiel sans mécanisme anti-oubli & — \\
+EWC & Régularisation élastique des poids critiques & \parencite{kirkpatrick2017} \\
+iCaRL & Replay + exemplaires + classification NCM & \parencite{rebuffi2017} \\
+\textbf{UWR (notre méthode)} & Replay pondéré par incertitude + prototypes + contrastif & Ce travail \\
+\hline
+\end{tabularx}
+\caption{Baselines — apprentissage continu}
+\label{tab:baselines_cl}
+\end{table}
+
+Toutes les méthodes utilisent le même backbone pré-entraîné pour garantir une comparaison équitable. EWC et iCaRL sont réimplémentés en PyTorch et adaptés au contexte HAR.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{0.88\textwidth}{|Y|c|}
+\hline
+\textbf{Méthode d'anticipation (livrée)} & \textbf{Macro-F1 (ordre de grandeur)} \\
+\hline
+LSTM multi-classe, fenêtres partielles,
+\texttt{transitions\_only} (notre méthode) & $\approx$ 0,59--0,64 \\
+\hline
+\end{tabularx}
+\caption{Baseline anticipation — formulation implémentée dans \texttt{har\_project}}
+\label{tab:baselines_anticipation}
+\end{table}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{|Y|Y|}
+\hline
+\textbf{Méthode CORAL} & \textbf{Description} \\
+\hline
+Sans adaptation & Évaluation directe sur WISDM du modèle entraîné sur HAPT \\
+CORAL non supervisé & Alignement de covariance sans étiquettes cibles \\
+CORAL supervisé (20~\%) & Alignement + fine-tuning avec 20~\% d'étiquettes cibles \\
+\hline
+\end{tabularx}
+\caption{Baselines — adaptation cross-dataset HAPT $\rightarrow$ WISDM}
+\label{tab:baselines_coral}
+\end{table}
+
+\subsection{Métriques retenues}
+
+Les métriques d'évaluation sont choisies pour couvrir à la fois la performance instantanée et la dynamique d'apprentissage continu :
+
+Accuracy (ACC) : taux de classification correcte global, calculé sur l'ensemble des tâches vues après la dernière mise à jour.
+
+Macro-F1 : moyenne non pondérée des F1-scores par classe, robuste au déséquilibre de classes.
+
+Forgetting (F) : mesure de la dégradation des performances sur les tâches passées (Chaudhry et al., 2018) :
+
+$$F = \frac{1}{T-1} \sum_{i=1}^{T-1} \max_{t \in \{i,\ldots,T\}} a_{t,i} - a_{T,i}$$
+
+où $a_{t,i}$ est l'accuracy sur la tâche $i$ après l'entraînement sur la tâche $t$.
+
+Backward Transfer (BWT) : version signée du forgetting, permettant de détecter également les cas de transfert positif rétroactif ($BWT > 0$).
+
+AUC-ROC : aire sous la courbe ROC, utilisée pour la détection de chutes et l'anticipation, insensible au seuil de décision.
+
+\section{Module auxiliaire — risque de chute et alerte}
+
+La fiche PFE demande d'anticiper une perte d'équilibre pour déclencher une
+alerte préventive. Notre conception combine :
+\begin{itemize}
+  \item \textbf{FallRiskHead} : tête LSTM binaire prédisant une transition
+  posturale à risque (labels 9--12) depuis un contexte partiel ;
+  \item \textbf{PhysicalFallDetector} : heuristique pic d'accélération puis
+  phase calme (démo / couche sécurité) ;
+  \item \textbf{ThresholdBandit + OnlineCalibrator} : adaptation du seuil
+  d'alerte et recalibrage des confidences en ligne.
+\end{itemize}
+
+\subsection{Métriques cibles}
+
+Macro-F1 binaire et accuracy pour le fall-risk ; objectif clinique sur chutes
+réelles (MobiAct) reporté. Résultat actuel : macro-F1 binaire $\approx$ 0,88
+sur transitions HAPT ($p\in\{50\%,75\%\}$) — preuve de concept, pas validation
+clinique. L'AUC-ROC 0,762 du détecteur hybride historique (proxy impact)
+reste documenté comme baseline complémentaire.
+
+\section{Conclusion}
+
+Ce chapitre a présenté la conception du système HAR adaptatif et continu.
+L'architecture à backbone Transformer partagé mutualise les représentations
+entre la reconnaissance continue (UWR + prototypes) et l'anticipation
+multi-classe (LSTM sur fenêtres partielles). UWR exploite l'incertitude
+épistémique (MC Dropout) pour guider le tampon de rejeu. L'anticipation
+multi-classe atteint un macro-F1 d'environ 0,60--0,64. Les modules SSL,
+foundation-style, calibration online, bandit de seuil et fall-risk alignent
+la conception sur la fiche PFE.
+
+Le chapitre suivant présente l'implémentation concrète de ces composants, les
+choix d'ingénierie effectués et les détails de configuration des expériences.
+
+\subsection{Synthèse des choix de conception}
+
+Retenir : (1)~backbone partagé ; (2)~UWR (tampon 2\,000) ; (3)~anticipation
+LSTM multi-classe sur fenêtres partielles (filtre transitions) ; (4)~CORAL
+avec labels cibles partiels ; (5)~SSL / foundation-style optionnels ;
+(6)~calibration + bandit de seuil ; (7)~fall-risk binaire ; (8)~protocoles CL
+user (sujets triés) et class ($2$ classes/tâche). L'évaluation chapitre~6
+valide ces choix.

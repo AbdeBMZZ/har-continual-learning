@@ -2,10 +2,10 @@
 Dataset for activity anticipation training.
 
 For each consecutive pair of windows (w_t, w_{t+1}) within the SAME subject:
-  - Input:  first p% of w_t  →  partial observation
+  - Input:  last p% of each context window  →  partial observation
   - Target: label of w_{t+1} →  next activity to predict
 
-We build sequences of S=5 consecutive partial windows as context,
+We build sequences of S consecutive partial windows as context,
 letting the LSTM in the anticipation head model temporal progression.
 
 Observation ratios: p ∈ {0.25, 0.50, 0.75}
@@ -13,7 +13,7 @@ Observation ratios: p ∈ {0.25, 0.50, 0.75}
 
 from __future__ import annotations
 
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 
@@ -31,13 +31,18 @@ def _build_subject_sequences(
     obs_len: int,
     seq_len: int,
     transitions_only: bool,
+    truncate_from: str = "end",
 ) -> Tuple[List[np.ndarray], List[int]]:
     """Build anticipation samples from one subject's contiguous windows."""
     contexts, targets = [], []
 
     for i in range(seq_len, len(X) - 1):
-        ctx_wins  = X[i - seq_len: i]
-        ctx_trunc = ctx_wins[:, :obs_len, :]
+        ctx_wins = X[i - seq_len: i]
+        if truncate_from == "end":
+            # Keep the last obs_len samples — transition cues are often late
+            ctx_trunc = ctx_wins[:, -obs_len:, :]
+        else:
+            ctx_trunc = ctx_wins[:, :obs_len, :]
         next_label = int(y[i])
 
         if transitions_only and next_label == int(y[i - 1]):
@@ -63,6 +68,7 @@ class AnticipationDataset:
         obs_ratio:     fraction of each window to observe (0.25, 0.50, 0.75)
         seq_len:       S — number of consecutive windows as context
         transitions_only: if True, only keep samples where label changes
+        truncate_from: "end" (default, last p%) or "start" (first p%)
     """
 
     def __init__(self,
@@ -71,19 +77,20 @@ class AnticipationDataset:
                  subjects: np.ndarray | None = None,
                  obs_ratio: float = 0.50,
                  seq_len: int = 5,
-                 transitions_only: bool = False):
+                 transitions_only: bool = False,
+                 truncate_from: str = "end"):
 
         self.obs_ratio = obs_ratio
         self.seq_len   = seq_len
+        self.truncate_from = truncate_from
         T              = X.shape[1]
         self.obs_len   = max(1, int(T * obs_ratio))
 
         contexts, targets = [], []
 
         if subjects is None:
-            # Fallback: treat entire array as one stream (legacy behaviour)
             ctx, tgt = _build_subject_sequences(
-                X, y, self.obs_len, seq_len, transitions_only)
+                X, y, self.obs_len, seq_len, transitions_only, truncate_from)
             contexts.extend(ctx)
             targets.extend(tgt)
         else:
@@ -93,7 +100,8 @@ class AnticipationDataset:
                 if len(X_s) <= seq_len + 1:
                     continue
                 ctx, tgt = _build_subject_sequences(
-                    X_s, y_s, self.obs_len, seq_len, transitions_only)
+                    X_s, y_s, self.obs_len, seq_len, transitions_only,
+                    truncate_from)
                 contexts.extend(ctx)
                 targets.extend(tgt)
 
@@ -121,6 +129,21 @@ class AnticipationDataset:
         return DataLoader(self, batch_size=batch_size,
                           shuffle=shuffle, num_workers=0)
 
+    def class_weights(self, n_classes: Optional[int] = None) -> "torch.Tensor":
+        """Inverse-frequency class weights for CrossEntropy (size n_classes)."""
+        if not TORCH_OK:
+            raise RuntimeError("PyTorch not available.")
+        if n_classes is None:
+            n_classes = int(self.y.max()) + 1 if len(self.y) else 1
+        counts = np.bincount(self.y, minlength=n_classes).astype(np.float64)
+        weights = np.zeros(n_classes, dtype=np.float64)
+        present = counts > 0
+        # median frequency balancing (robust to extreme imbalance)
+        med = np.median(counts[present])
+        weights[present] = med / counts[present]
+        weights = weights / weights[present].mean()  # normalize mean=1
+        return torch.tensor(weights, dtype=torch.float32)
+
     def majority_baseline(self) -> float:
         """Macro-F1 of always predicting the most frequent class."""
         if len(self.y) == 0:
@@ -134,7 +157,8 @@ class AnticipationDataset:
         unique, counts = np.unique(self.y, return_counts=True)
         lines = [
             f"AnticipationDataset — {len(self)} samples",
-            f"  obs_ratio={self.obs_ratio}  seq_len={self.seq_len}",
+            (f"  obs_ratio={self.obs_ratio}  seq_len={self.seq_len}"
+             f"  truncate_from={self.truncate_from}"),
             f"  context shape: {self.X.shape}",
             f"  majority baseline F1: {self.majority_baseline():.4f}",
             f"  classes: {dict(zip(unique.tolist(), counts.tolist()))}",
@@ -150,15 +174,20 @@ def build_anticipation_datasets(
     seq_len: int = 5,
     seed: int = 42,
     transitions_only: bool = True,
+    truncate_from: str = "end",
+    ratios: Optional[List[float]] = None,
 ):
     """
-    Build train/val anticipation datasets for all three obs ratios.
+    Build train/val anticipation datasets for observation ratios.
 
     Split is by **subject** to avoid temporal leakage between train and val.
 
     Returns:
-        {0.25: (train_ds, val_ds), 0.50: ..., 0.75: ...}
+        {ratio: (train_ds, val_ds), ...}
     """
+    if ratios is None:
+        ratios = [0.25, 0.50, 0.75]
+
     rng = np.random.default_rng(seed)
 
     if subjects is not None:
@@ -182,16 +211,18 @@ def build_anticipation_datasets(
         s_train, s_val   = None, None
 
     result = {}
-    for ratio in [0.25, 0.50, 0.75]:
+    for ratio in ratios:
         train_ds = AnticipationDataset(
             X_train, y_train, subjects=s_train,
             obs_ratio=ratio, seq_len=seq_len,
             transitions_only=transitions_only,
+            truncate_from=truncate_from,
         )
         val_ds = AnticipationDataset(
             X_val, y_val, subjects=s_val,
             obs_ratio=ratio, seq_len=seq_len,
             transitions_only=transitions_only,
+            truncate_from=truncate_from,
         )
         result[ratio] = (train_ds, val_ds)
 

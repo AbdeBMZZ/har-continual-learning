@@ -1,0 +1,547 @@
+\chapter{Réalisation de la solution}
+\label{ch:10-Realisation}
+
+\section{Introduction}
+
+Ce chapitre décrit l'implémentation concrète du système conçu au chapitre précédent. Nous passons de la conception théorique à la réalisation logicielle, en détaillant les choix techniques effectués à chaque étape : environnement de développement, préparation des données, implémentation du backbone Transformer, des modules de reconnaissance continue et d'anticipation, et des contributions supplémentaires (détection de chutes et adaptation CORAL). Chaque section s'appuie sur le code source produit, en en explicitant la logique, les paramètres et les justifications des choix réalisés. L'ensemble du projet est organisé en modules Python réutilisables, documentés et versionnés.
+
+\section{Environnement de développement}
+
+\subsection{Plateformes utilisées}
+
+Le développement et les expériences ont été conduits sur une machine Apple MacBook Pro équipée d'un processeur Apple M-series (architecture ARM), disposant de 16 Go de mémoire unifiée. L'accélération matérielle est assurée par le backend MPS (Metal Performance Shaders) de PyTorch, permettant d'exploiter le GPU Apple Silicon sans recourir à CUDA. Pour les expériences plus longues, l'environnement Google Colab (GPU Tesla T4) a également été utilisé.
+
+Le système d'exploitation est macOS Sequoia. L'environnement Python est géré par Homebrew avec Python 3.14, et les dépendances sont isolées dans un environnement virtuel dédié au projet.
+
+\subsection{Langages et frameworks}
+
+Python 3.14 est le langage principal du projet. PyTorch 2.x constitue le framework de deep learning, choisi pour sa flexibilité dans la définition d'architectures personnalisées et sa compatibilité native avec le backend MPS. Le calcul scientifique repose sur NumPy pour les opérations matricielles et SciPy pour le prétraitement du signal (filtrage Butterworth, rééchantillonnage).
+
+L'évaluation et la comparaison des modèles utilisent scikit-learn pour le calcul des métriques (F1-score, accuracy, AUC-ROC, classification\_report). La visualisation des résultats et des embeddings fait appel à Matplotlib et Seaborn.
+
+\subsection{Bibliothèques et outils}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{0.88\textwidth}{|Y|c|Y|}
+\hline
+\textbf{Bibliothèque} & \textbf{Version} & \textbf{Rôle} \\
+\hline
+torch          & 2.x   & Framework deep learning \\
+numpy          & 1.26+ & Calcul numérique \\
+scipy          & 1.12+ & Traitement du signal \\
+scikit-learn   & 1.4+  & Métriques et évaluation \\
+matplotlib     & 3.8+  & Visualisation \\
+seaborn        & 0.13+ & Visualisation avancée \\
+tqdm           & 4.x   & Barres de progression \\
+\hline
+\end{tabularx}
+\caption{Principales dépendances Python (\texttt{requirements.txt})}
+\label{tab:dependencies}
+\end{table}
+
+\subsection{Structure du projet et suivi de version}
+
+\begin{lstlisting}[language=bash,caption={Structure du projet \texttt{har\_project/}},label=lst:project_tree]
+har_project/
+|-- src/
+|   |-- data/
+|   |   |-- preprocessing.py       # pipeline pretraitement
+|   |   |-- har_dataset.py         # Dataset PyTorch
+|   |   |-- augmentation.py        # augmentation en ligne
+|   |   `-- anticipation_dataset.py
+|   |-- models/
+|   |   |-- backbone.py            # IMUTransformerEncoder
+|   |   |-- har_model.py           # modele complet deux tetes
+|   |   |-- replay_buffer.py       # tampon de rejeu standard
+|   |   |-- uncertainty_replay.py  # UWR
+|   |   |-- mc_dropout.py          # Monte Carlo Dropout
+|   |   |-- prototype_memory.py    # memoire de prototypes
+|   |   |-- fall_risk.py           # fall-risk + heuristique physique
+|   |   |-- online_calibration.py  # temperature + seuil adaptatif
+|   |   `-- domain_adapter.py      # CORAL
+|   |-- training/
+|   |   |-- trainer.py             # boucle pre-entrainement
+|   |   |-- anticipation_trainer.py
+|   |   |-- ssl_pretrain.py        # SimCLR-style IMU
+|   |   |-- fall_risk_trainer.py
+|   |   `-- rl_threshold_agent.py  # bandit de seuil
+|   `-- scenarios/
+|       `-- adl_scenarios.py       # repas (indisponible) + proxy UI
+|-- scripts/                       # scripts executables
+|-- checkpoints/                   # modeles sauvegardes
+|-- data/
+|   |-- raw/                       # donnees brutes
+|   `-- processed/                 # donnees pretraitees
+`-- docs/                          # memoire LaTeX
+\end{lstlisting}
+
+Le suivi de version est géré par Git. Chaque composant fonctionnel (backbone, UWR, CORAL, anticipation) fait l'objet d'une implémentation et d'une validation indépendantes avant intégration dans le modèle complet.
+
+\section{Préparation des données}
+
+\subsection{Chargement et homogénéisation des datasets}
+
+Le chargement des données brutes est implémenté dans le module src/data/dataset\_loaders.py. Pour chaque dataset, un chargeur spécifique lit les fichiers sources, applique les conversions d'unités nécessaires et produit un tableau NumPy brut $(N_{sujets}, T_{total}, C)$.
+
+Chargement HAPT. Les données HAPT sont distribuées sous forme de fichiers texte séparés pour les signaux d'accélération et de gyroscope, avec des annotations temporelles d'activité. Le chargeur lit les 30 fichiers sujets, concatène les canaux accéléromètre (3 canaux, unité g) et gyroscope (3 canaux, unité rad/s), et charge les étiquettes échantillon-par-échantillon depuis les fichiers de labels.
+
+Chargement WISDM. Le dataset WISDM est distribué sous forme d'un fichier CSV unique. Chaque ligne correspond à un échantillon avec les colonnes : identifiant sujet, étiquette d'activité, timestamp, $a_x$, $a_y$, $a_z$. Le chargeur regroupe les lignes par sujet et activité, et comble les éventuelles discontinuités temporelles détectées par des sauts dans les timestamps.
+
+Homogénéisation. Les deux datasets sont ramenés à une représentation commune $(N, T=150, C=6)$ par application du pipeline décrit en §5.3.2. Les étiquettes sont remappées vers un espace commun entier ${0, 1, \ldots, n_classes-1}$. Dans les expériences multi-dataset, un dictionnaire de correspondance de classes est appliqué manuellement.
+
+\subsection{Implémentation du pipeline de prétraitement}
+
+\begin{lstlisting}[language=Python,caption={Constantes globales du prétraitement (\texttt{preprocessing.py})},label=lst:preproc_const]
+TARGET_HZ   = 50      # fréquence cible (Hz)
+WINDOW_SIZE = 150     # 3 secondes × 50 Hz
+STEP_SIZE   = 75      # chevauchement 50 %
+OVERLAP     = 0.5
+G           = 9.80665 # m/s²
+\end{lstlisting}
+
+Rééchantillonnage. La fonction \texttt{resample\_signal(signal, original\_hz)} utilise \texttt{scipy.signal.resample} pour interpoler ou sous-échantillonner le signal vers \texttt{TARGET\_HZ = 50} Hz.
+
+\begin{lstlisting}[language=Python,caption={Rééchantillonnage à 50 Hz},label=lst:resample]
+def resample_signal(signal, original_hz):
+    if original_hz == TARGET_HZ:
+        return signal
+    n_new = int(signal.shape[0] * TARGET_HZ / original_hz)
+    return resample(signal, n_new, axis=0)
+\end{lstlisting}
+
+Suppression de la gravité. La fonction \texttt{remove\_gravity(signal, fs, cutoff=0.5)} implémente un filtre passe-bas Butterworth d'ordre 5 à fréquence de coupure 0,5 Hz.
+
+\begin{lstlisting}[language=Python,caption={Suppression de la composante gravitationnelle},label=lst:gravity]
+def remove_gravity(signal, fs=TARGET_HZ, cutoff=0.5):
+    b, a = butter(5, cutoff / (fs / 2.0), btype='low', analog=False)
+    gravity = filtfilt(b, a, signal, axis=0)
+    return signal - gravity
+\end{lstlisting}
+
+Segmentation par fenêtre glissante. La fonction sliding\_windows(signal) extrait des fenêtres de WINDOW\_SIZE = 150 échantillons avec un stride de STEP\_SIZE = 75 (chevauchement 50 \%). Pour chaque fenêtre, l'étiquette majoritaire est assignée via numpy.bincount. La fonction sliding\_windows\_with\_labels(signal, labels) est utilisée quand les annotations sont disponibles au niveau échantillon.
+
+Normalisation z-score. La fonction normalize\_signal(signal, mean, std) normalise chaque canal indépendamment. Les statistiques (moyenne et écart-type) sont calculées sur les données d'entraînement du sujet courant et réutilisées pour normaliser ses données de test, évitant toute fuite d'information.
+
+Pipeline complet. La fonction preprocess\_signal(signal, original\_hz, unit) enchaîne les quatre étapes ci-dessus et produit directement les fenêtres normalisées prêtes à être injectées dans le modèle.
+
+\subsection{Construction du flux incrémental simulé}
+
+Pour simuler un flux de données réaliste, les données prétraitées sont réorganisées selon les scénarios d'apprentissage définis en §4.2.1. Cette logique est implémentée dans src/data/har\_dataset.py.
+
+Scénario user-incrémental. Les fenêtres sont partitionnées par sujet via
+\texttt{subjects.npy}. L'ordre des tâches suit les identifiants sujets
+triés (\texttt{user\_incremental\_tasks} : un sujet = une tâche), pas une
+permutation aléatoire.
+
+Scénario class-incrémental. Les classes sont regroupées par paquets de
+\texttt{classes\_per\_task=2} (défaut de \texttt{train.py}), avec mélange de
+l'ordre des classes sous graine fixe (\texttt{seed=42}).
+
+Dataset. La classe \texttt{HARDataset} encapsule les tableaux NumPy
+$(X, y, \mathrm{subjects}, \mathrm{origins})$. L'augmentation n'est pas un
+flag du Dataset : elle est appliquée dans la boucle d'entraînement / module
+\texttt{augmentation.py} lorsque le script l'active.
+
+\section{Implémentation du backbone Transformer}
+
+\subsection{Architecture détaillée}
+
+Le backbone est implémenté dans src/models/backbone.py. La classe principale IMUTransformerEncoder hérite de nn.Module et est construite par composition de trois sous-modules : PositionalEncoding, une liste de TransformerBlock, et une couche de normalisation finale.
+
+Encodage positionnel. La classe PositionalEncoding calcule à l'initialisation les codes sinusoïdaux fixes selon la formule standard :
+
+$$PE_{pos, 2i} = \sin\left(\frac{pos}{10000^{2i/d}}\right), \quad PE_{pos, 2i+1} = \cos\left(\frac{pos}{10000^{2i/d}}\right)$$
+
+Ces codes sont stockés comme buffer non-paramètre (non mis à jour par le gradient). Un paramètre scalaire self.scale appris, initialisé à 1, module l'amplitude des codes positionnels. Le dropout est appliqué après addition pour régularisation.
+
+Blocs Transformer. Chaque TransformerBlock implémente l'architecture pré-norme (pre-LN), plus stable que la post-norme pour les petits datasets. L'ordre des opérations est : LayerNorm → MultiheadAttention → connexion résiduelle → LayerNorm → FFN → connexion résiduelle. L'attention multi-têtes est implémentée via nn.MultiheadAttention(d\_model=128, num\_heads=4, batch\_first=True). La FFN est composée de Linear(128, 256) → GELU → Dropout(0.1) → Linear(256, 128) → Dropout(0.1).
+
+Le passage forward du backbone effectue les opérations suivantes :
+
+\begin{lstlisting}[language=Python,caption={Forward pass du backbone},label=lst:backbone_forward]
+def forward(self, x):          # x: (B, T, 6)
+    B = x.size(0)
+    x = self.input_proj(x)     # (B, T, 128)
+    cls = self.cls_token.expand(B, -1, -1)
+    x = torch.cat([cls, x], dim=1)  # (B, T+1, 128)
+    x = self.pos_enc(x)
+    for block in self.blocks:
+        x = block(x)
+    x = self.norm(x)
+    return x[:, 0]             # (B, 128) — token CLS
+\end{lstlisting}
+
+Le token CLS est initialisé avec des valeurs proches de zéro (trunc\_normal\_(std=0.02)) et évolue librement pendant l'entraînement pour apprendre à agréger l'information globale de la fenêtre par le mécanisme d'attention.
+
+Initialisation des poids. Toutes les couches linéaires sont initialisées par la méthode trunc\_normal\_(std=0.02), standard pour les Transformers, avec les biais initialisés à zéro.
+
+Fonction utilitaire. La fonction build\_backbone(cfg=None) permet de créer un backbone avec des hyperparamètres personnalisés ou les valeurs par défaut :
+
+defaults = dict(in\_channels=6, d\_model=128, n\_heads=4,
+
+n\_blocks=4, ffn\_dim=256, dropout=0.1)
+
+\subsection{Pré-entraînement initial}
+
+Le pré-entraînement du backbone est réalisé par le script scripts/train.py via la classe BaselineTrainer du module src/training/baseline\_trainer.py. Le modèle complet HARContinualModel (backbone + tête de classification HAR) est entraîné en mode supervisé standard sur les données HAPT.
+
+Optimiseur. AdamW avec taux d'apprentissage $lr = 10^{-3}$ et pénalité de régularisation $\lambda_{wd} = 10^{-4}$. Un scheduler cosinus (CosineAnnealingLR) réduit le taux d'apprentissage de $lr$ à $lr \times 0{,}01$ sur 100 epochs.
+
+Perte. Cross-entropie standard sur les 12 classes HAPT, sans pondération de classes. Un mixup léger (alpha=0.2) est appliqué pour régularisation.
+
+Split train/validation. 80 \% des sujets pour l'entraînement (24 sujets), 20 \% pour la validation (6 sujets), avec séparation stricte par sujet pour éviter la fuite de données inter-sujets.
+
+Augmentation. Lors du pré-entraînement, l'IMUAugmenter est activé avec probabilité $p_{\mathrm{apply}} = 0{,}5$ par transformation : bruit gaussien ($\sigma = 0{,}01$), mise à l'échelle ($s \in [0{,}85, 1{,}15]$), déformation temporelle ($\sigma_{\mathrm{warp}} = 0{,}05$), dropout de canaux ($p_{\mathrm{drop}} = 0{,}1$), et découpage de fenêtre ($r_{\mathrm{crop}} = 0{,}9$). L'augmentation permet d'améliorer l'accuracy de validation de 81~\% (sans) à 91,3~\% (avec), soit un gain de +10 points.
+
+\begin{figure}[H]
+  \centering
+  \insertfig[max width=0.88\linewidth]{pretrain_history.png}{har\_project/results/figures/}{Courbes d'apprentissage}
+  \caption[Courbes de pré-entraînement]{Courbes de loss et macro-F1 lors du pré-entraînement
+  supervisé sur HAPT.}
+  \label{fig:pretrain_impl}
+\end{figure}
+
+Sauvegarde. Le meilleur checkpoint (selon le F1 macro de validation) est sauvegardé dans checkpoints/pretrained\_backbone.pt avec la structure :
+
+torch.save(\{
+
+"model\_state":      model.state\_dict(),
+
+"prototype\_state":  model.har\_head.prototype\_memory.state(),
+
+"val\_acc":          best\_acc,
+
+"val\_f1":           best\_f1,
+
+\}, path)
+
+\subsection{Visualisation des représentations apprises}
+
+Pour vérifier la qualité des représentations apprises, une projection t-SNE est calculée sur les embeddings du backbone sur 1 000 fenêtres test tirées aléatoirement. Les embeddings 128-dimensionnels sont réduits à 2 dimensions par t-SNE (perplexité=30, itérations=1000). La visualisation confirme une séparation nette des clusters par classe d'activité, avec les activités dynamiques (marche, jogging) bien séparées des activités statiques (assis, debout, allongé). Les transitions posturales se placent naturellement entre les paires d'activités statiques correspondantes, témoignant d'une représentation géométriquement cohérente.
+
+\begin{figure}[H]
+  \centering
+  \insertfig[max width=0.82\linewidth]{tsne_embeddings.png}{har\_project/results/figures/}{Projection t-SNE}
+  \caption[Projection t-SNE des embeddings]{Projection t-SNE des embeddings CLS — séparation
+  par classe d'activité.}
+  \label{fig:tsne_impl}
+\end{figure}
+
+\section{Implémentation du module de reconnaissance continue}
+
+\subsection{Gestion des prototypes}
+
+La mémoire de prototypes est implémentée dans src/models/prototype\_memory.py via la classe PrototypeMemory. Elle maintient un dictionnaire \{class\_id → prototype\_vector\} et un compteur de mises à jour par classe.
+
+Mise à jour. La méthode update(embeddings, labels) calcule l'embedding moyen par classe dans le lot courant et met à jour les prototypes par moyenne exponentielle mobile :
+
+def update(self, embeddings, labels):
+
+for c in labels.unique():
+
+mask = (labels == c)
+
+batch\_mean = embeddings[mask].mean(dim=0)
+
+if c.item() in self.prototypes:
+
+self.prototypes[c.item()] = (
+
+self.momentum * self.prototypes[c.item()]
+
++ (1 - self.momentum) * batch\_mean.detach()
+
+)
+
+else:
+
+self.prototypes[c.item()] = batch\_mean.detach().clone()
+
+Inférence. La méthode predict(embeddings) calcule la distance euclidienne de chaque embedding à tous les prototypes connus et retourne la classe du prototype le plus proche. Si aucun prototype n'est encore enregistré pour une classe, celle-ci est exclue de la prédiction.
+
+Perte contrastive. La méthode contrastive\_loss(embeddings, labels, temperature=0.07) implémente une perte de séparation inter-classes en espace de prototypes. Pour chaque exemple, la perte est calculée comme le log-softmax négatif de la similarité cosinus normalisée par la température, maximisant la proximité au prototype de la classe correcte et minimisant celle aux autres prototypes.
+
+\subsection{Tampon de rejeu et Uncertainty-Weighted Replay}
+
+Deux implémentations du tampon de rejeu sont disponibles, selon une interface commune définie dans src/models/replay\_buffer.py.
+
+Tampon standard (ReplayBuffer). La classe ReplayBuffer maintient deux tableaux NumPy circulaires buffer\_X et buffer\_y de capacité capacity=2000. La méthode add\_batch(X, y) insère les nouveaux exemples selon la stratégie de réservoir. La méthode sample(batch\_size, device) retourne un lot aléatoire sous forme de tenseurs PyTorch sur le dispositif spécifié.
+
+\begin{lstlisting}[language=Python,caption={Échantillonnage UWR depuis le tampon},label=lst:uwr_sample]
+def sample_uncertain(self, model, batch_size, device):
+    scores = self.priority_scores[:self.size] + self.epsilon
+    probs  = scores / scores.sum()
+    indices = np.random.choice(self.size, size=batch_size,
+                               replace=False, p=probs)
+    X = torch.from_numpy(self.buffer_X[indices]).to(device)
+    y = torch.from_numpy(self.buffer_y[indices]).to(device)
+    return X, y
+\end{lstlisting}
+
+Le paramètre alpha contrôle la force de la priorisation : $\alpha = 1{,}0$ correspond à un échantillonnage purement proportionnel aux incertitudes, tandis que $\alpha \to 0$ converge vers l'échantillonnage uniforme.
+
+\subsection{Intégration du Monte Carlo Dropout}
+
+Le Monte Carlo Dropout est implémenté dans src/models/mc\_dropout.py. La fonction add\_dropout\_to\_backbone(backbone, p=0.1) ajoute un module nn.Dropout supplémentaire au sein de chaque bloc Transformer, de manière non-destructive. Cette approche évite de modifier l'architecture du backbone déjà pré-entraîné.
+
+\begin{lstlisting}[language=Python,caption={Estimation d'incertitude par MC Dropout},label=lst:mc_dropout]
+def mc_uncertainty(model, x, n_passes=20):
+    model.train()  # active le dropout
+    probs_list = []
+    with torch.no_grad():
+        for _ in range(n_passes):
+            logits = model(x)
+            probs_list.append(torch.softmax(logits, dim=-1))
+    mean_probs = torch.stack(probs_list).mean(dim=0)
+    entropy = -(mean_probs * torch.log(mean_probs + 1e-8)).sum(dim=-1)
+    model.eval()
+    return entropy  # (B,)
+\end{lstlisting}
+
+La classe MCDropoutReplayBuffer encapsule un ReplayBuffer standard et un mécanisme d'appel à mc\_uncertainty lors de l'ajout de nouveaux exemples. Pour limiter le surcoût computationnel, l'estimation d'incertitude n'est effectuée que pour les exemples candidats à l'insertion, pas pour l'intégralité du tampon.
+
+\subsection{Entraînement incrémental complet}
+
+Le modèle complet HARContinualModel est implémenté dans src/models/har\_model.py. Il encapsule le backbone, la tête HAR, la mémoire de prototypes et le tampon de rejeu dans une interface unifiée.
+
+\begin{lstlisting}[language=Python,caption={Pas d'apprentissage continu (\texttt{continual\_step})},label=lst:continual_step]
+def continual_step(self, x, y, optimizer, replay_batch_size=32, device=None):
+    self.train()
+    optimizer.zero_grad()
+    emb_curr    = self.backbone(x)
+    logits_curr = self.har_head(emb_curr)
+    loss_ce     = F.cross_entropy(logits_curr, y)
+    loss_replay = torch.tensor(0.0, device=device)
+    if len(buffer) >= replay_batch_size:
+        rx, ry        = buffer.sample_uncertain(self, replay_batch_size, device)
+        emb_replay    = self.backbone(rx)
+        logits_replay = self.har_head(emb_replay)
+        loss_replay   = F.cross_entropy(logits_replay, ry)
+    loss_contrast = self.har_head.contrastive_loss(emb_curr, y)
+    total_loss = loss_ce + loss_replay + 0.1 * loss_contrast
+    total_loss.backward()
+    optimizer.step()
+    self.har_head.update_prototypes(emb_curr.detach(), y)
+    buffer.add_batch(x.cpu().numpy(), y.cpu().numpy())
+    return {"loss_ce": ..., "loss_replay": ..., "loss_contrast": ...}
+\end{lstlisting}
+
+Ce design garantit que chaque pas d'apprentissage met simultanément à jour les paramètres du modèle, les prototypes et le contenu du tampon de rejeu, maintenant une cohérence globale entre tous les composants.
+
+\subsection{Orchestration des scripts d'expérience}
+
+Chaque protocole du chapitre~6 correspond à un script exécutable dans
+\texttt{har\_project/scripts/}. Le tableau~\ref{tab:scripts_exp} résume la
+chaîne de dépendances.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{|>{\raggedright\arraybackslash}p{4.5cm}|Y|>{\raggedright\arraybackslash}p{3.2cm}|}
+\hline
+\textbf{Script} & \textbf{Rôle} & \textbf{Sortie principale} \\
+\hline
+\texttt{preprocess.py} & Charge / fenêtre / normalise les jeux & \texttt{data/processed/*.npz} \\
+\texttt{train.py --mode pretrain} & Pré-train backbone + tête CE & \texttt{checkpoints/*.pt} \\
+\texttt{train.py --mode continual --scenario user} & Boucle user-incrémental UWR & Matrice $R[i,j]$, métriques CL \\
+\texttt{train.py --mode continual --scenario class} & Class-incrémental & Figures forgetting class \\
+\texttt{train\_anticipation.py} & Tête LSTM multi-classe (backbone gelé) & F1 / acc. par ratio $p$ \\
+\texttt{train\_anticipation\_joint.py} & Variante joint backbone+LSTM & Checkpoint anticipation \\
+\texttt{cross\_dataset\_eval.py} & Adaptation / eval HAPT$\rightarrow$WISDM & F1 cross-dataset \\
+\texttt{regenerate\_figures.sh} & Regénère les figures & \texttt{results/figures/*.png} \\
+\hline
+\end{tabularx}
+\caption{Scripts d'expérience et artefacts produits}
+\label{tab:scripts_exp}
+\end{table}
+
+Le script user-incrémental charge le checkpoint pré-entraîné, initialise un
+\texttt{UncertaintyWeightedReplayBuffer(2000)} et une \texttt{PrototypeMemory},
+puis itère sur la liste ordonnée des sujets. Après chaque tâche, il sérialise
+la matrice $R$ et les courbes d'oubli au format NumPy/PNG. La reprise sur
+erreur est possible en passant \texttt{--start\_task k} pour éviter de
+réentraîner les $k-1$ premières tâches — utile lors du développement.
+
+Le logging console affiche, par époque : loss CE, loss replay, loss contrastive,
+macro-F1 sur le sujet courant et sur un sous-échantillon de sujets passés (max
+5 pour limiter le temps). Les checkpoints intermédiaires sont sauvegardés tous
+les 10 sujets.
+
+\subsection{Validation unitaire et tests de non-régression}
+
+Avant l'intégration, chaque module a été testé isolément : \texttt{backbone.py}
+(forward shape $(B,128)$), \texttt{replay\_buffer.py} (capacité circulaire,
+stratégie réservoir), \texttt{uncertainty\_replay.py} (somme des probabilités
+d'échantillonnage = 1), \texttt{domain\_adapter.py} (symétrie CORAL source/cible).
+Un jeu synthétique de 100 fenêtres aléatoires permet de vérifier en $<$30~s que
+la chaîne complète \texttt{continual\_step} ne diverge pas numériquement (NaN).
+
+\section{Implémentation du module d'anticipation}
+
+\subsection{Architecture LSTM multi-classe}
+
+Le module d'anticipation est la classe \texttt{AnticipationHead}
+(\texttt{src/models/har\_model.py}), entraînée via
+\texttt{scripts/train\_anticipation.py} (backbone gelé) et
+\texttt{scripts/train\_anticipation\_joint.py} (joint optionnel).
+
+\begin{verbatim}
+self.lstm = nn.LSTM(input_size=d_model, hidden_size=128,
+                    num_layers=2, batch_first=True, dropout=0.2)
+self.classifier = nn.Sequential(
+    nn.LayerNorm(128),
+    nn.Linear(128, n_classes),
+)
+\end{verbatim}
+
+Le LSTM est unidirectionnel. \texttt{anticipate()} aplatit
+$(B,S,T_{\mathrm{partial}},C)$, encode chaque fenêtre, reforme $(B,S,d)$
+puis appelle le LSTM.
+
+\subsection{Dataset et entraînement}
+
+\texttt{AnticipationDataset} : contexte $S=5$ fenêtres tronquées à $p\,\%$,
+cible = label de la fenêtre suivante, filtre \texttt{transitions\_only}.
+Le split train/val (80/20) est obtenu après mélange des fenêtres
+(\texttt{build\_anticipation\_datasets}).
+
+Dans \texttt{anticipation\_trainer.py} : backbone + HAR gelés ; AdamW sur la
+tête LSTM ; perte \texttt{cross\_entropy} ; métriques accuracy et macro-F1 ;
+un entraînement par ratio $p$.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{0.88\textwidth}{|Y|c|c|}
+\hline
+\textbf{Configuration} & \textbf{Macro-F1} & \textbf{Commentaire} \\
+\hline
+LSTM multi-classe, backbone gelé, $p=25\%$ & $\approx$ 0,59 & Fin de fenêtre + poids de classes \\
+LSTM multi-classe, backbone gelé, $p=50\%$ & $\approx$ 0,63 & Idem \\
+LSTM multi-classe, backbone gelé, $p=75\%$ & $\approx$ 0,64 & Checkpoint \texttt{anticipation.pt} \\
+Baseline majorité & $\approx$ 0,04 & Toujours la classe la plus fréquente \\
+\hline
+\end{tabularx}
+\caption{Résultats du module d'anticipation}
+\label{tab:anticipation_impl}
+\end{table}
+\section{Contributions supplémentaires}
+
+\subsection{Détection de chute — approche hybride / fall-risk}
+
+La composante alerte / équilibre est réalisée par \texttt{FallRiskHead}
+(\texttt{src/models/fall\_risk.py}, script \texttt{train\_fall\_risk.py}) :
+prédiction \emph{binaire} indiquant si la prochaine activité est une transition
+posturale à risque (labels 9--12 : stand$\leftrightarrow$sit, sit$\leftrightarrow$lie).
+Un détecteur physique heuristique (\texttt{PhysicalFallDetector}) complète la
+couche sécurité (pic d'accélération puis phase calme). La classe unifiée
+\texttt{fall} est absente du merge HAPT+WISDM actuel.
+
+Résultats. Sur validation, le macro-F1 binaire de la tête fall-risk atteint
+environ 0,88 ($p\in\{50\%,75\%\}$). L'interface Streamlit et le bandit de
+seuil (\texttt{ThresholdBandit}) illustrent l'adaptation en ligne du seuil
+d'alerte (RL léger), couplée à une calibration de température
+(\texttt{OnlineCalibrator}).
+
+\subsection{SSL, foundation-style, calibration et RL léger}
+
+Pour coller aux orientations de la fiche PFE, des modules légers ont été
+ajoutés :
+\begin{itemize}
+  \item pré-entraînement auto-supervisé SimCLR-style
+  (\texttt{scripts/train\_ssl.py} $\rightarrow$ \texttt{ssl\_backbone.pt}) :
+  augmentations bruit / scale / mask + perte NT-Xent ;
+  \item pipeline foundation-style SSL puis fine-tune
+  (\texttt{train\_foundation\_style.py} $\rightarrow$ \texttt{foundation\_style.pt},
+  run démonstratif, distinct du \texttt{pretrained.pt} de production) ;
+  \item calibration online
+  (\texttt{online\_calibration.py} : température + seuil adaptatif) ;
+  \item bandit $\varepsilon$-greedy de seuil d'alerte
+  (\texttt{rl\_threshold\_agent.py}).
+\end{itemize}
+Le scénario « préparation de repas » reste hors portée faute de corpus cuisine
+(\texttt{adl\_scenarios.py}, statut \texttt{available=False}). L'interface
+Streamlit expose six scénarios (reconnaissance, nouvel utilisateur,
+anticipation, fall-risk, calibration+RL, SSL/foundation).
+
+\subsection{Adaptateur de domaine CORAL}
+
+L'adaptation de domaine est implémentée dans src/models/domain\_adapter.py via la classe CORALAdapter. CORAL (CORrelation ALignment, Sun \& Saenko, 2016) aligne les statistiques de second ordre (matrices de covariance) entre les embeddings source et cible pour réduire le domain shift.
+
+Calcul de la perte CORAL. La perte CORAL est définie comme la distance de Frobenius entre les matrices de covariance source $C_s$ et cible $C_t$ :
+
+$$\mathcal{L}_{CORAL} = \frac{1}{4d^2} |C_s - C_t|_F^2$$
+
+où $d = 128$ est la dimension des embeddings. La fonction coral\_loss(source\_features, target\_features) est implémentée comme suit :
+
+def coral\_loss(source, target):
+
+d = source.size(1)
+
+\# Centrer les features
+
+source = source - source.mean(dim=0)
+
+target = target - target.mean(dim=0)
+
+\# Matrices de covariance
+
+ns, nt = source.size(0), target.size(0)
+
+Cs = (source.T @ source) / (ns - 1)
+
+Ct = (target.T @ target) / (nt - 1)
+
+\# Distance de Frobenius normalisée
+
+loss = torch.norm(Cs - Ct, p='fro') ** 2 / (4 * d * d)
+
+return loss
+
+CORAL non supervisé. Sans étiquettes cibles, seul l'alignement de covariance est appliqué. Le modèle source est fine-tuné sur les données cibles en minimisant $\mathcal{L}_{CORAL}$ seul, sans supervision. Les paramètres du backbone sont légèrement ajustés (lr = $10^{-5}$) tandis que la tête de classification reste gelée.
+
+CORAL supervisé. Avec 20 \% des étiquettes cibles disponibles, la perte totale combine l'alignement de covariance et la supervision par cross-entropie :
+
+$$\mathcal{L}_{\mathrm{total}} = \mathcal{L}_{\mathrm{CE}}(x_{\mathrm{cible, labeled}}) + \lambda_{\mathrm{CORAL}} \cdot \mathcal{L}_{\mathrm{CORAL}}(x_{\mathrm{source}}, x_{\mathrm{cible}})$$
+
+avec $\lambda_{CORAL} = 1{,}0$. Le fine-tuning est effectué sur 20 epochs avec le backbone pré-entraîné sur HAPT.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{0.72\textwidth}{|Y|c|}
+\hline
+\textbf{Configuration CORAL} & \textbf{F1 macro} \\
+\hline
+Sans adaptation & 0,040 \\
+CORAL non supervisé & 0,040 (+0,8~\%) \\
+CORAL supervisé (20~\% labels) & \textbf{0,629 ($\times 15$)} \\
+\hline
+\end{tabularx}
+\caption{Résultats adaptation HAPT $\rightarrow$ WISDM}
+\label{tab:coral_impl}
+\end{table}
+
+Le gain spectaculaire du CORAL supervisé (+×15 par rapport à l'absence d'adaptation) s'explique par l'effet synergique de l'alignement de covariance et des quelques exemples étiquetés : l'alignement crée une représentation commune source-cible, puis la supervision affine la tête de classification dans cet espace aligné.
+
+\section{Conclusion}
+
+Ce chapitre a présenté les choix d'implémentation pour concrétiser l'architecture
+du Chapitre~4. Chaque composant — backbone Transformer, tampon UWR, module
+d'anticipation LSTM, fall-risk, SSL/foundation-style, calibration+RL, adaptateur
+CORAL — est un module Python indépendant intégré dans \texttt{HARContinualModel}.
+Les expériences valident l'augmentation de données, l'UWR et CORAL ;
+l'anticipation multi-classe atteint $\approx$0,60--0,64 de macro-F1. Le chapitre
+suivant présente l'évaluation systématique.
+
+\subsection{Retour d'expérience implémentation}
+
+Trois décisions d'ingénierie ont accéléré le développement : (1)~interface commune
+\texttt{ReplayBuffer} / \texttt{UncertaintyWeightedReplayBuffer} pour baselines
+AB ; (2)~gel du backbone pendant les premières expériences d'anticipation pour
+isoler la tête ; (3)~script unique \texttt{regenerate\_figures.sh} pour éviter
+les figures manuelles obsolètes. Le backend MPS (Apple Silicon) a divisé par
+deux le temps de pré-train vs CPU ; les runs 44 tâches restent overnight ($\sim$8h)
+— argument pour checkpoints intermédiaires documentés en annexe~H.

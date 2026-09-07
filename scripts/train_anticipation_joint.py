@@ -32,11 +32,13 @@ def get_device():
 
 
 def train_joint(model, datasets, n_epochs=20, batch_size=128,
-                lr_lstm=5e-4, lr_backbone=5e-5, device="cpu"):
+                lr_lstm=5e-4, lr_backbone=5e-5, device="cpu",
+                use_class_weights=True, n_classes=None):
     """
     Entraînement conjoint — backbone + LSTM avec taux différenciés.
     lr_backbone << lr_lstm pour ne pas écraser les représentations.
     """
+    import copy
     device_t = torch.device(device)
     model    = model.to(device_t)
 
@@ -45,14 +47,16 @@ def train_joint(model, datasets, n_epochs=20, batch_size=128,
         if len(train_ds) == 0: continue
         print(f"\n  p={obs_ratio:.2f} | train={len(train_ds)} val={len(val_ds)}")
 
-        # Réinitialiser le LSTM
         for m in model.anticipation_head.modules():
             if isinstance(m, nn.LSTM):
                 for name, p in m.named_parameters():
                     if "weight" in name: nn.init.orthogonal_(p)
                     elif "bias" in name: nn.init.zeros_(p)
 
-        # Optimiseur avec taux différenciés
+        weight = None
+        if use_class_weights and len(train_ds) > 0:
+            weight = train_ds.class_weights(n_classes=n_classes).to(device_t)
+
         optimizer = AdamW([
             {"params": model.backbone.parameters(),          "lr": lr_backbone},
             {"params": model.anticipation_head.parameters(), "lr": lr_lstm},
@@ -63,21 +67,20 @@ def train_joint(model, datasets, n_epochs=20, batch_size=128,
         train_loader = train_ds.dataloader(batch_size=batch_size, shuffle=True)
         val_loader   = val_ds.dataloader(batch_size=batch_size, shuffle=False)
 
-        best_f1, best_acc = 0, 0
+        best_f1, best_acc = -1.0, 0.0
+        best_head, best_backbone = None, None
         for epoch in range(1, n_epochs + 1):
-            # ── Train ──
             model.train()
             for X_seq, y_next in train_loader:
                 X_seq  = X_seq.to(device_t)
                 y_next = y_next.to(device_t)
                 optimizer.zero_grad()
                 logits = model.anticipate(X_seq)
-                F.cross_entropy(logits, y_next).backward()
+                F.cross_entropy(logits, y_next, weight=weight).backward()
                 nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
             scheduler.step()
 
-            # ── Val ──
             model.eval()
             preds, labels, losses = [], [], []
             with torch.no_grad():
@@ -92,13 +95,20 @@ def train_joint(model, datasets, n_epochs=20, batch_size=128,
             y_true = np.concatenate(labels)
             val_f1  = macro_f1(y_true, y_pred)
             val_acc = float((y_pred == y_true).mean())
-            if val_f1 > best_f1: best_f1 = val_f1
-            if val_acc > best_acc: best_acc = val_acc
+            if val_f1 > best_f1:
+                best_f1 = val_f1
+                best_acc = val_acc
+                best_head = copy.deepcopy(model.anticipation_head.state_dict())
+                best_backbone = copy.deepcopy(model.backbone.state_dict())
 
             if epoch % 5 == 0 or epoch == 1:
                 print(f"    epoch {epoch:3d}/{n_epochs} | "
                       f"val_loss={np.mean(losses):.4f} | "
                       f"val_F1={val_f1:.4f} | val_acc={val_acc:.4f}")
+
+        if best_head is not None:
+            model.anticipation_head.load_state_dict(best_head)
+            model.backbone.load_state_dict(best_backbone)
 
         results[obs_ratio] = {"val_f1": best_f1, "val_acc": best_acc}
         print(f"  Best: F1={best_f1:.4f}  Acc={best_acc:.4f}")
@@ -133,7 +143,7 @@ def main():
 
     datasets = build_anticipation_datasets(
         X, y, subjects=subjects, test_ratio=0.2,
-        seq_len=5, transitions_only=True)
+        seq_len=5, transitions_only=True, truncate_from="end")
 
     print("=== Entraînement conjoint backbone + LSTM ===")
     results = train_joint(model, datasets,
@@ -141,7 +151,9 @@ def main():
                            batch_size=args.batch_size,
                            lr_lstm=args.lr_lstm,
                            lr_backbone=args.lr_backbone,
-                           device=device)
+                           device=device,
+                           use_class_weights=True,
+                           n_classes=n_classes)
 
     print("\n=== Résultats anticipation (joint) ===")
     print(f"  {'Obs ratio':>10}  {'Val F1':>8}  {'Val Acc':>8}")

@@ -30,6 +30,10 @@ from src.data.homogenization import (
 from src.data.har_dataset import HARDataset
 from src.models.har_model import build_model
 from src.models.prototype_memory import PrototypeMemory
+from src.models.fall_risk import FallRiskHead, labels_to_fall_risk, FALL_RISK_LABELS
+from src.models.online_calibration import OnlineCalibrator
+from src.training.rl_threshold_agent import ThresholdBandit
+from src.scenarios.adl_scenarios import meal_status
 
 # Prénoms fictifs pour la démo jury — clé = slug « dataset-local_id » (ex. wisdm-5).
 # Les IDs globaux uniques sont dans data/processed/subject_meta.json.
@@ -130,8 +134,12 @@ def label_name(y: int) -> str:
 @st.cache_resource(show_spinner="Chargement du modèle et des données…")
 def load_system():
     data_dir = ROOT / "data" / "processed"
-    ckpt_path = ROOT / "checkpoints" / "pretrained.pt"
-    ant_path = ROOT / "checkpoints" / "anticipation.pt"
+    ckpt_dir = ROOT / "checkpoints"
+    ckpt_path = ckpt_dir / "pretrained.pt"
+    ant_path = ckpt_dir / "anticipation.pt"
+    fall_path = ckpt_dir / "fall_risk.pt"
+    ssl_path = ckpt_dir / "ssl_backbone.pt"
+    found_path = ckpt_dir / "foundation_style.pt"
 
     if not data_dir.exists():
         st.error(f"Dossier introuvable : {data_dir}")
@@ -164,6 +172,16 @@ def load_system():
         }
         model.anticipation_head.load_state_dict(ant_state, strict=False)
 
+    fall_risk_head = None
+    fall_meta = {}
+    has_fall_risk = fall_path.exists()
+    if has_fall_risk:
+        fr = torch.load(fall_path, map_location="cpu", weights_only=False)
+        fall_risk_head = FallRiskHead(d_model=model.backbone.d_model)
+        fall_risk_head.load_state_dict(fr["fall_risk_head"])
+        fall_risk_head.eval()
+        fall_meta = {"obs_ratio": fr.get("obs_ratio"), "val_f1": fr.get("val_f1")}
+
     model.eval()
     n_params = sum(p.numel() for p in model.parameters())
     return {
@@ -176,6 +194,11 @@ def load_system():
         "subject_meta": subject_meta,
         "n_params": n_params,
         "has_anticipation": has_anticipation,
+        "has_fall_risk": has_fall_risk,
+        "fall_risk_head": fall_risk_head,
+        "has_ssl": ssl_path.exists(),
+        "has_foundation": found_path.exists(),
+        "fall_risk_meta": fall_meta,
     }
 
 
@@ -280,6 +303,7 @@ def run_demo3(model, X, y, subjects, n_samples: int, seed: int, obs_ratio: float
     ant_ds = AnticipationDataset(
         X, y, subjects=subjects,
         obs_ratio=obs_ratio, seq_len=5, transitions_only=True,
+        truncate_from="end",
     )
     rng = np.random.default_rng(seed)
     n = min(n_samples, len(ant_ds))
@@ -299,6 +323,74 @@ def run_demo3(model, X, y, subjects, n_samples: int, seed: int, obs_ratio: float
     return rows, baseline, int(obs_ratio * 100)
 
 
+def run_demo_fall_risk(model, fall_head, X, y, subjects, n_samples, seed, obs_ratio):
+    ant_ds = AnticipationDataset(
+        X, y, subjects=subjects,
+        obs_ratio=obs_ratio, seq_len=5, transitions_only=True,
+        truncate_from="end",
+    )
+    rng = np.random.default_rng(seed)
+    n = min(n_samples, len(ant_ds))
+    idx = rng.choice(len(ant_ds), n, replace=False) if n > 0 else []
+    rows = []
+    model.eval()
+    fall_head.eval()
+    for wi in idx:
+        x_seq, y_next = ant_ds[wi]
+        y_bin = int(labels_to_fall_risk(np.array([int(y_next)]))[0])
+        with torch.no_grad():
+            S, T, C = x_seq.shape
+            emb = model.backbone(x_seq.view(S, T, C)).view(1, S, -1)
+            logit = fall_head(emb)[0]
+            prob = float(torch.sigmoid(logit).item())
+            pred = int(prob >= 0.5)
+        rows.append({
+            "Prochaine activité": label_name(y_next),
+            "Risque réel": "Oui" if y_bin else "Non",
+            "Prédiction": "Oui" if pred else "Non",
+            "Confiance risque": f"{prob:.2f}",
+            "correct": pred == y_bin,
+            "prob": prob,
+            "y_bin": y_bin,
+        })
+    return rows
+
+
+def run_demo_calibration_rl(model, fall_head, X, y, subjects, n_steps, seed, obs_ratio):
+    ant_ds = AnticipationDataset(
+        X, y, subjects=subjects,
+        obs_ratio=obs_ratio, seq_len=5, transitions_only=True,
+        truncate_from="end",
+    )
+    rng = np.random.default_rng(seed)
+    n = min(n_steps, len(ant_ds))
+    idx = rng.choice(len(ant_ds), n, replace=False) if n > 0 else []
+    bandit = ThresholdBandit(epsilon=0.15, seed=seed)
+    calibrator = OnlineCalibrator(n_classes=2)
+    model.eval()
+    fall_head.eval()
+    history = []
+    for wi in idx:
+        x_seq, y_next = ant_ds[wi]
+        y_bin = int(labels_to_fall_risk(np.array([int(y_next)]))[0])
+        with torch.no_grad():
+            S, T, C = x_seq.shape
+            emb = model.backbone(x_seq.view(S, T, C)).view(1, S, -1)
+            logit = fall_head(emb)[0].cpu()
+            prob = float(torch.sigmoid(logit).item())
+            logits2 = torch.stack([-logit, logit])
+        rec = bandit.step(confidence=prob, is_positive=bool(y_bin))
+        calibrator.feedback(logits2, y_bin)
+        history.append({
+            "Risque réel": "Oui" if y_bin else "Non",
+            "Confiance": f"{prob:.2f}",
+            "Seuil bandit": f"{rec['threshold']:.2f}",
+            "Alerte": "🔔" if rec["alert"] else "—",
+            "Reward": f"{rec['reward']:+.2f}",
+        })
+    return history, bandit, calibrator
+
+
 # ── Sidebar ──────────────────────────────────────────────────────────────────
 st.sidebar.markdown("## ⌚ HAR — Démo PFE")
 st.sidebar.markdown("**NEDJAM Walaa** · ESI 2025/2026")
@@ -311,6 +403,9 @@ page = st.sidebar.radio(
         "1️⃣ Reconnaissance",
         "2️⃣ Nouvel utilisateur (Karim)",
         "3️⃣ Anticipation",
+        "4️⃣ Fall-risk (équilibre)",
+        "5️⃣ Calibration + RL",
+        "6️⃣ SSL / Foundation-style",
     ],
     help="Choisissez la partie du système à montrer au jury.",
 )
@@ -329,8 +424,10 @@ Shape `(B, 150, 6)` · `IMUTransformerEncoder` (4 blocs, 128 dim)
 backbone + `ContinualHARHead` + `AnticipationHead` (LSTM)
 
 **Checkpoints** :
-- `pretrained.pt` → poids du **backbone** (entraîné en pretrain)
-- `anticipation.pt` → poids du **AnticipationHead** seulement
+- `pretrained.pt` → backbone
+- `anticipation.pt` → AnticipationHead
+- `fall_risk.pt` → FallRiskHead
+- `ssl_backbone.pt` / `foundation_style.pt` → SSL / foundation-style
     """)
 
 sys_data = load_system()
@@ -345,9 +442,17 @@ st.sidebar.metric("Fenêtres (X)", f"{len(ds):,}")
 st.sidebar.metric("Sujets", len(np.unique(subjects)))
 st.sidebar.metric("Paramètres modèle", f"{sys_data['n_params']:,}")
 if sys_data["has_anticipation"]:
-    st.sidebar.success("Module anticipation : chargé")
+    st.sidebar.success("Anticipation : OK")
 else:
     st.sidebar.warning("anticipation.pt absent")
+if sys_data["has_fall_risk"]:
+    st.sidebar.success("Fall-risk : OK")
+else:
+    st.sidebar.warning("fall_risk.pt absent")
+if sys_data["has_ssl"]:
+    st.sidebar.info("SSL backbone : OK")
+if sys_data["has_foundation"]:
+    st.sidebar.info("Foundation-style : OK")
 
 # ── Pages ────────────────────────────────────────────────────────────────────
 if page == "🏠 Accueil":
@@ -363,13 +468,18 @@ if page == "🏠 Accueil":
         "→ <code>AnticipationHead</code> (LSTM) pour prédire la fenêtre suivante"
     )
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.info("**Module 1 — Reconnaissance**\n\nLe Transformer lit X et prédit y via les prototypes.")
+        st.info("**1 — Reconnaissance**\n\nTransformer + prototypes.")
     with c2:
-        st.success("**Continual learning**\n\nUn nouvel utilisateur met à jour les prototypes sans ré-entraîner.")
+        st.success("**2 — Continual**\n\nNouvel utilisateur sans retrain.")
     with c3:
-        st.warning("**Module 2 — Anticipation**\n\nSignal partiel → prédit la prochaine activité.")
+        st.warning("**3 — Anticipation**\n\nProchaine activité (F1 ~0.60).")
+    with c4:
+        st.error("**4 — Fall-risk**\n\nAlerte équilibre (F1 ~0.88).")
+
+    st.markdown("Pages **5** (calibration + RL) et **6** (SSL / foundation-style) complètent la fiche PFE.")
+    st.caption(meal_status())
 
     with st.expander("📖 Composants du modèle (har_model.py)"):
         st.markdown("""
@@ -378,9 +488,11 @@ if page == "🏠 Accueil":
 | `IMUTransformerEncoder` | `backbone.py` | `model.backbone(X)` → vecteur 128 dim |
 | `ContinualHARHead` | `har_model.py` | Classifieur + prototypes |
 | `PrototypeMemory` | `prototype_memory.py` | `update()` puis `predict()` nearest-mean |
-| `ReplayBuffer` | `replay_buffer.py` | Utilisé à l'entraînement continual (pas en démo live) |
-| `AnticipationHead` | `har_model.py` | `model.anticipate()` → LSTM sur 5 embeddings |
-| `predict(x, mode="prototype")` | `har_model.py` | Inférence continual en production |
+| `ReplayBuffer` / UWR | `replay_buffer.py` | Entraînement continual (pas live) |
+| `AnticipationHead` | `har_model.py` | `model.anticipate()` |
+| `FallRiskHead` | `fall_risk.py` | Alerte transitions posturales |
+| `OnlineCalibrator` | `online_calibration.py` | Temperature + seuil |
+| `ThresholdBandit` | `rl_threshold_agent.py` | RL léger sur seuil d'alerte |
         """)
 
 elif page == "1️⃣ Reconnaissance":
@@ -636,6 +748,134 @@ elif page == "3️⃣ Anticipation":
             "<b>Prédiction</b> = sortie du module LSTM à partir du signal partiel."
         )
         st.info("Application : détecter une chute ou un changement d'activité **avant** qu'il soit complet.")
+
+elif page == "4️⃣ Fall-risk (équilibre)":
+    st.markdown("## Démo 4 — Anticipation risque d'équilibre / chute")
+    explain(
+        "Tête binaire <code>FallRiskHead</code> : prédit si la <b>prochaine</b> activité "
+        "est une transition posturale à risque "
+        f"(labels {sorted(FALL_RISK_LABELS)} : stand↔sit, sit↔lie).<br>"
+        "Ce n'est pas la classe <code>fall</code> (absente du merge HAPT+WISDM)."
+    )
+    if not sys_data["has_fall_risk"] or sys_data["fall_risk_head"] is None:
+        st.error("Checkpoint manquant : `checkpoints/fall_risk.pt` "
+                 "(lancer `python scripts/train_fall_risk.py`)")
+        st.stop()
+
+    meta = sys_data.get("fall_risk_meta") or {}
+    if meta.get("val_f1") is not None:
+        st.caption(f"Checkpoint val F1 ≈ {meta['val_f1']:.3f} "
+                   f"(p={meta.get('obs_ratio', '?')})")
+
+    obs_pct = st.select_slider("Part du signal observé (%)",
+                               options=[50, 75], value=75, key="fr_obs")
+    n_samples = st.slider("Nombre d'exemples", 5, 20, 10, key="fr_n")
+    seed = st.number_input("Seed", 0, 9999, 11, key="fr_seed")
+    run = st.button("▶ Tester fall-risk", type="primary")
+
+    if run:
+        rows = run_demo_fall_risk(
+            model, sys_data["fall_risk_head"], X, y, subjects,
+            n_samples, seed, obs_pct / 100.0)
+        correct = sum(r["correct"] for r in rows)
+        m1, m2 = st.columns(2)
+        m1.metric("Correct", f"{correct}/{len(rows)}")
+        m2.metric("Signal observé", f"{obs_pct}%")
+        st.dataframe(
+            results_dataframe(rows)[
+                ["Prochaine activité", "Risque réel", "Prédiction",
+                 "Confiance risque", "Résultat"]
+            ],
+            use_container_width=True, hide_index=True,
+        )
+
+elif page == "5️⃣ Calibration + RL":
+    st.markdown("## Démo 5 — Calibration online + bandit RL")
+    explain(
+        "<b>Calibration</b> : temperature scaling + seuil de confiance adaptatif "
+        "(<code>OnlineCalibrator</code>).<br>"
+        "<b>RL</b> : bandit ε-greedy qui choisit le seuil d'alerte "
+        "(<code>ThresholdBandit</code>) avec reward +1 / −0.5 selon vrais/faux alertes."
+    )
+    if not sys_data["has_fall_risk"] or sys_data["fall_risk_head"] is None:
+        st.error("Nécessite `fall_risk.pt`.")
+        st.stop()
+
+    n_steps = st.slider("Pas du flux (stream)", 20, 200, 80, key="rl_n")
+    seed = st.number_input("Seed", 0, 9999, 3, key="rl_seed")
+    run = st.button("▶ Simuler le flux online", type="primary")
+
+    if run:
+        history, bandit, calibrator = run_demo_calibration_rl(
+            model, sys_data["fall_risk_head"], X, y, subjects,
+            n_steps, seed, obs_ratio=0.75)
+        st.success(bandit.summary())
+        c1, c2 = st.columns(2)
+        c1.metric("Temperature T", f"{calibrator.temp.temperature:.3f}")
+        c2.metric("Seuil adaptatif", f"{calibrator.threshold.threshold:.3f}")
+        st.dataframe(pd.DataFrame(history).tail(30),
+                     use_container_width=True, hide_index=True)
+        rewards = [float(h["Reward"]) for h in history]
+        fig, ax = plt.subplots(figsize=(8, 2.5))
+        ax.plot(np.cumsum(rewards), color="#0050a0")
+        ax.set_title("Reward cumulée du bandit")
+        ax.set_xlabel("Pas")
+        ax.grid(alpha=0.3)
+        st.pyplot(fig)
+        plt.close(fig)
+
+elif page == "6️⃣ SSL / Foundation-style":
+    st.markdown("## Démo 6 — SSL & pipeline foundation-style")
+    explain(
+        "<b>SSL</b> : prétrain sans labels (SimCLR-style IMU).<br>"
+        "<b>Foundation-style</b> : SSL → fine-tune supervisé "
+        "(pattern fondation à l'échelle de nos datasets — pas un FM public)."
+    )
+    c1, c2, c3 = st.columns(3)
+    c1.metric("ssl_backbone.pt",
+              "✓" if sys_data["has_ssl"] else "✗")
+    c2.metric("foundation_style.pt",
+              "✓" if sys_data["has_foundation"] else "✗")
+    c3.metric("pretrained.pt (réf. HAR)", "✓")
+
+    st.markdown("""
+| Checkpoint | Rôle | Comment entraîner |
+|------------|------|-------------------|
+| `ssl_backbone.pt` | Backbone SSL seul | `scripts/train_ssl.py` |
+| `foundation_style.pt` | SSL + FT (F1~0.47 run court) | `scripts/train_foundation_style.py` |
+| `pretrained.pt` | HAR supervisé fort (prod démo) | `scripts/train.py --mode pretrain` |
+    """)
+    st.info(
+        "Pour le jury : on montre que le **pattern** SSL→FT est implémenté. "
+        "La démo live reconnaissance/anticipation utilise `pretrained.pt` "
+        "(meilleures perfs)."
+    )
+    st.caption(meal_status())
+
+    if sys_data["has_foundation"] and st.button(
+            "▶ Tester foundation_style.pt (quelques fenêtres)", type="primary"):
+        found = build_model(n_classes=int(y.max()) + 1)
+        ck = torch.load(ROOT / "checkpoints" / "foundation_style.pt",
+                        map_location="cpu", weights_only=False)
+        found.load_state_dict(ck["model_state"], strict=False)
+        found.eval()
+        rng = np.random.default_rng(0)
+        idx = rng.choice(len(X), 8, replace=False)
+        rows = []
+        with torch.no_grad():
+            for i in idx:
+                logits = found(torch.from_numpy(X[i:i+1].astype(np.float32)))
+                pred = int(logits.argmax(-1).item())
+                rows.append({
+                    "Activité réelle": label_name(y[i]),
+                    "Prédiction (FT)": label_name(pred),
+                    "correct": pred == int(y[i]),
+                })
+        correct = sum(r["correct"] for r in rows)
+        st.metric("Accuracy échantillon", f"{correct}/{len(rows)}")
+        st.dataframe(results_dataframe(rows)[
+            ["Activité réelle", "Prédiction (FT)", "Résultat"]],
+            use_container_width=True, hide_index=True)
 
 st.sidebar.markdown("---")
 st.sidebar.caption("`streamlit run app_streamlit.py`")

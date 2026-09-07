@@ -1,0 +1,139 @@
+\chapter*{Conclusion générale et Perspectives}
+\addcontentsline{toc}{chapter}{Conclusion générale et Perspectives}
+\markboth{Conclusion générale}{Conclusion générale}
+\label{sec:conclusion}
+
+\section{Rappel du contexte}
+
+La HAR par IMU est utile, mais un modèle figé après un entraînement initial ne
+tient pas longtemps en conditions réelles : nouveaux porteurs, capteurs différents,
+activités non vues à l'entraînement. Réapprendre sans mécanisme anti-oubli dégrade
+l'existant ; rester purement réactif empêche d'alerter avant une transition. Ce
+mémoire a visé les deux axes : adaptation continue et anticipation légère, en
+alignement avec la fiche PFE~26/2755.
+
+\section{Ce que nous avons apporté}
+
+\textbf{Backbone Transformer.} L'encodeur \emph{IMUTransformerEncoder} (531\,K
+paramètres, 4 blocs, token CLS) atteint 91,3~\% d'accuracy sur HAPT avec
+augmentation — niveau compétitif sans pré-entraînement massif.
+
+\textbf{UWR.} Le tampon de rejeu priorise les exemples incertains (MC Dropout).
+Avec 2\,000 exemples mémorisés, l'oubli passe de 0,24 (finetuning naïf) à 0,09
+dans le protocole 10 sujets ; UWR bat EWC et iCaRL sur les scénarios testés.
+
+\textbf{Anticipation LSTM multi-classe.} Une tête \texttt{AnticipationHead}
+(LSTM + Linear) prédit l'activité suivante depuis $S=5$ fenêtres partielles
+($p\in\{25,50,75\}\%$), avec filtrage \texttt{transitions\_only} et backbone
+gelé. Le macro-F1 de validation atteint environ 0,60--0,64 : la tâche reste non
+triviale mais opérationnelle en démo.
+
+\textbf{CORAL.} Aligner les covariances d'embeddings avec 20~\% de labels WISDM
+multiplie le F1 cross-dataset par~15 (0,040 $\rightarrow$ 0,629).
+
+\textbf{Modules fiche PFE.} SSL SimCLR-style et pipeline foundation-style
+(checkpoints dédiés) ; calibration de température + seuil adaptatif en ligne ;
+bandit $\varepsilon$-greedy de seuil d'alerte (RL léger) ; fall-risk binaire
+(macro-F1 $\approx$0,88 sur transitions 9--12) ; scénario repas documenté comme
+indisponible faute de corpus.
+
+Un module hybride d'impact (seuils physiques + MLP) atteint AUC-ROC 0,762 sur
+proxy HAPT ; les chutes réelles restent à valider (MobiAct).
+
+\section{Bilan chiffré}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{0.92\textwidth}{|Y|c|c|c|}
+\hline
+\textbf{Tâche} & \textbf{Baseline} & \textbf{Notre système} & \textbf{Gain} \\
+\hline
+Classification HAR       & 81,0~\% & 91,3~\% & +10,3 pts \\
+CL user-incrémental        & 62,4~\% & 79,2~\% & +16,8 pts \\
+CL class-incrémental       & 62,4~\% & 79,8~\% & +17,4 pts \\
+Anticipation (macro-F1)    & —       & $\approx$0,60--0,64 & fin fenêtre + poids \\
+Adaptation CORAL (F1)      & 0,040   & 0,629   & $\times 15$ \\
+Fall-risk (macro-F1)       & —       & $\approx$0,88 & transitions 9--12 \\
+Détection impact (AUC)     & —       & 0,762   & — \\
+\hline
+\end{tabularx}
+\caption{Bilan quantitatif des contributions}
+\label{tab:bilan_conclusion}
+\end{table}
+
+Les leviers — bonnes représentations, mémoire intelligente, modules auxiliaires —
+se renforcent mutuellement plutôt que de se substituer.
+
+\section{Limites}
+
+Nous restons à ~12 points sous le \emph{joint training} (91,3~\% vs 79,2~\% en CL)
+: prix de la mémoire bornée et de l'accès séquentiel aux données. L'anticipation
+multi-classe (macro-F1 $\approx$0,60--0,64) est utilisable en démo ; un déploiement
+clinique reste un déploiement d'alerte. Les chutes sont testées sur transitions
+posturales, pas sur chutes réelles. SSL / foundation / RL sont des versions
+légères ; le repas reste hors portée sans corpus cuisine.
+
+\section{Perspectives}
+
+\textbf{Court terme.} Intégrer MobiAct pour les chutes ; enrichir l'augmentation
+(mixup inter-sujets) ; améliorer l'anticipation (oversampling des transitions,
+contexte temporel) ; corpus ADL cuisine pour le scénario repas.
+
+\textbf{Moyen terme.} Porter le modèle sur Android/iOS (ONNX / TFLite) ;
+distiller l'incertitude MC en une passe ; évaluer OPPORTUNITY et PAMAP2 ;
+few-shot par utilisateur sur les prototypes ; durcir le SSL (plus de données).
+
+\textbf{Long terme.} Agent RL pour composer le tampon (au-delà du bandit de
+seuil) ; backbone foundation public \parencite{yuan2024} avec UWR ; fusion
+IMU + PPG/EMG en CL multi-modal.
+
+\subsection{Publication et ouverture}
+
+Le projet \texttt{har\_project/} est structuré pour une reprise ou une
+soumission workshop (ISWC, PerCom). Les figures sont régénérables ; les
+checkpoints permettent de reproduire les courbes sans réentraînement complet.
+Une publication ciblée pourrait isoler UWR avec un protocole OCL-HAR
+strictement reproduit.
+
+En définitive, une HAR adaptative et embarquable est atteignable avec des
+contraintes réalistes. UWR et CORAL apportent des gains mesurables ;
+l'anticipation LSTM et le fall-risk montrent la faisabilité de modules
+proactifs, avec des performances encore à améliorer.
+
+\section{Retour sur les objectifs du mémoire}
+
+Au départ, cinq objectifs avaient été fixés (chapitre~4). Bilan :
+
+\begin{itemize}
+  \item \textbf{Backbone universel} : atteint (91,3~\% HAPT, F1 macro 0,752).
+  \item \textbf{CL robuste} : atteint partiellement — UWR bat baselines sur 10 et
+  44 sujets, mais F1 class-incrémental final modeste (0,16) par déséquilibre.
+  \item \textbf{Anticipation} : atteint partiellement — macro-F1 $\approx$0,60--0,64 ;
+  fall-risk binaire $\approx$0,88.
+  \item \textbf{Cross-dataset CORAL} : atteint (F1 0,629, $\times 15$) avec 20~\%
+  labels cibles.
+  \item \textbf{Détection chutes / alerte} : démonstration de faisabilité
+  (fall-risk + AUC impact 0,762) ; validation clinique reportée (MobiAct).
+  \item \textbf{SSL / foundation / calibration / RL} : modules livrés (légers),
+  couvrant les orientations de la fiche.
+\end{itemize}
+
+\section{Apports méthodologiques}
+
+Deux idées sont combinées dans le système : (1)~rejeu pondéré par incertitude
+épistémique MC sur IMU (UWR) ; (2)~CORAL appliqué aux embeddings d'un
+Transformer pré-entraîné avec supervision partielle cible. L'anticipation LSTM
+multi-classe, le fall-risk, le SSL foundation-style et la calibration+bandit
+complètent le système. Leur intégration dans \texttt{har\_project} constitue
+la contribution ingénierie du mémoire.
+
+\section{Message pour le déploiement}
+
+Un ingénieur souhaitant déployer une HAR adaptive peut retenir : pré-train
+supervisé modeste suffit si l'augmentation est soignée ; un tampon de 2\,000
+fenêtres avec UWR vaut mieux qu'un finetuning naïf pour des dizaines d'utilisateurs ;
+l'anticipation multi-classe seule ne suffit pas encore pour des alertes fiables
+(préférer fall-risk binaire + seuil calibré) ; le cross-domain exige quelques
+labels cibles — CORAL seul ne suffit pas. Ces enseignements sont documentés
+avec scripts reproductibles en annexe.

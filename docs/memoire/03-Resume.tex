@@ -1,0 +1,94 @@
+\mychapter{0}{Résumé}
+
+
+Les capteurs inertiels des smartphones et montres permettent de reconnaître les
+activités humaines (HAR), avec des applications en santé et assistance. Un modèle
+entraîné une seule fois sur des données de laboratoire peine pourtant à suivre de
+nouveaux utilisateurs ou contextes : c'est l'oubli catastrophique. Par ailleurs,
+peu de systèmes anticipent une transition avant qu'elle ne se produise.
+
+Ce mémoire propose une architecture HAR adaptative et continue, alignée sur la
+fiche PFE~26/2755. Après un état de l'art sur les capteurs, l'apprentissage
+continu et l'anticipation, nous décrivons un backbone Transformer partagé et
+deux modules principaux : reconnaissance continue avec Uncertainty-Weighted
+Replay (UWR), et anticipation multi-classe de l'activité suivante à partir de
+fenêtres partielles (tête LSTM, backbone gelé). Des modules complémentaires
+couvrent les orientations de la fiche : SSL SimCLR-style, pipeline
+foundation-style, calibration de confiance en ligne, bandit de seuil (RL léger)
+et anticipation du risque de chute (transitions posturales). L'évaluation sur
+HAPT et WISDM montre des gains nets par rapport à EWC, iCaRL et finetuning
+naïf (+16,8 points macro-F1 en user-incrémental). L'anticipation multi-classe
+atteint un macro-F1 de validation d'environ 0,60--0,64 selon le ratio
+d'observation (baseline majorité $\approx$ 0,04) ; le fall-risk binaire atteint
+environ 0,88.
+
+Le système \texttt{har\_project} comprend plus de 531\,000 paramètres pour le
+backbone, un tampon de rejeu de 2\,000 fenêtres, et des modules CORAL, SSL,
+calibration et chutes. Les expériences couvrent le pré-entraînement (91,3~\%
+accuracy HAPT), l'adaptation 44 sujets (F1 0,543), le class-incrémental six
+tâches, l'anticipation LSTM, le fall-risk, et l'adaptation cross-dataset CORAL
+(F1 0,629). Le scénario « préparation de repas » reste hors portée faute de
+corpus cuisine. Les annexes documentent datasets, hyperparamètres, code et
+fiches bibliographiques pour faciliter la reproduction et la poursuite en thèse
+ou publication.
+
+\bigskip
+\noindent\textbf{Mots clés :} Reconnaissance d'activités humaines, apprentissage
+continu, capteurs inertiels, Transformer, Uncertainty-Weighted Replay, anticipation
+d'activités, auto-supervision, calibration en ligne.
+
+\clearpage
+
+\mychapter{0}{Abstract}
+
+
+Human activity recognition (HAR) from IMUs on phones and wearables supports mobile
+health and assisted living. Models trained once on lab data often fail when new
+users or contexts appear — catastrophic forgetting. Few systems anticipate
+activity changes before they occur.
+
+This thesis presents an adaptive continual HAR architecture aligned with PFE
+sheet 26/2755: a shared Transformer backbone, continual recognition with
+Uncertainty-Weighted Replay (UWR), multi-class next-activity anticipation from
+partial windows (LSTM head, frozen backbone), plus complementary modules —
+SimCLR-style SSL, foundation-style pretrain$\rightarrow$adapt, online confidence
+calibration, a light threshold bandit (RL), and binary fall-risk anticipation.
+Experiments on HAPT and WISDM show clear gains over EWC, iCaRL and naive
+fine-tuning (+16.8 macro-F1 points in user-incremental learning). Multi-class
+anticipation reaches validation macro-F1 $\approx$ 0.60--0.64 depending on the
+observation ratio (majority baseline $\approx$ 0.04); binary fall-risk reaches
+$\approx$ 0.88.
+
+\bigskip
+\noindent\textbf{Keywords:} Human activity recognition, continual learning, inertial
+sensors, Transformer, Uncertainty-Weighted Replay, activity anticipation,
+self-supervised learning, online calibration.
+
+\clearpage
+
+\chapter*{\hfill \textarabic{ملخص}}
+
+\begin{otherlanguage}{arabic}
+\noindent
+\textarabic{%
+يعتمد التعرف على الأنشطة البشرية (HAR) من حساسات القصور الذاتي (IMU) في
+الهواتف والساعات على تطبيقات الصحة والمساعدة. النماذج المدرّبة مرة واحدة على
+بيانات مخبرية تفشل أمام مستخدمين أو سياقات جديدة (النسيان الكارثي)، وقليل
+منها يتوقع الانتقالات مسبقاً.}
+
+\bigskip
+\noindent
+\textarabic{%
+يقترح هذا المذكّر بنية HAR تكيفية ومستمرة وفق بطاقة المشروع: عمود فقري
+Transformer، تعرف مستمر بـ UWR، توقع متعدد الأصناف عبر رأس LSTM، مع وحدات
+SSL ومعايرة عتبة وتنبيه سقوط. التجارب على HAPT و WISDM تظهر مكاسب واضحة
+مقارنة بـ EWC و iCaRL والضبط البسيط.}
+
+\bigskip
+\noindent\textbf{\textarabic{الكلمات المفتاحية:}}
+\textarabic{%
+التعرف على الأنشطة البشرية، التعلم المستمر، حساسات القصور الذاتي،
+Transformer، UWR، توقع النشاط.}
+\end{otherlanguage}
+
+\addcontentsline{toc}{chapter}{ملخص}

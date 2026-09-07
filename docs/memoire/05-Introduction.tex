@@ -1,0 +1,102 @@
+\chapter*{Introduction générale}
+\addcontentsline{toc}{chapter}{Introduction générale}
+\markboth{Introduction générale}{Introduction générale}
+\label{chap:introduction}
+
+Reconnaître une activité à partir d'un accéléromètre ou d'un gyroscope dans un
+téléphone ou une montre, c'est devenu courant — pour le sport, la santé, l'aide
+à domicile. Le modèle classique reste pourtant le même : on collecte des données
+en laboratoire, on entraîne un réseau une fois, on déploie. Dès qu'un nouvel
+utilisateur arrive, que le capteur change de place ou qu'une activité inédite
+apparaît, les performances chutent. Réentraîner tout depuis zéro coûte cher ;
+finetuner naïvement fait oublier ce qui marchait avant. Et dans la majorité
+des systèmes, on ne fait que classifier l'instant présent, sans prévenir la
+transition qui arrive.
+
+Ce mémoire part de ce constat. Nous proposons un système de HAR qui (1) apprend
+de façon continue quand de nouveaux utilisateurs ou classes arrivent, et (2)
+détecte tôt les changements d'activité. L'implémentation s'appuie sur le projet
+\texttt{har\_project} : backbone Transformer, tampon de rejeu guidé par
+l'incertitude (UWR), anticipation multi-classe de l'activité suivante via une
+tête LSTM sur fenêtres partielles, plus des modules CORAL et détection de chutes.
+
+\textbf{Partie I} (chapitres 1 à 3) pose le contexte : fondements HAR, concepts
+d'apprentissage continu, revue des travaux proches et lacunes identifiées.
+
+\textbf{Partie II} (chapitres 4 à 6) décrit la conception, l'implémentation et
+l'évaluation de notre solution, avec comparaisons aux baselines EWC, iCaRL et
+finetuning séquentiel.
+
+Les chapitres suivants détaillent chaque brique ; la conclusion générale en
+synthétise les résultats et les perspectives.
+
+\section{Problématique détaillée}
+
+\subsection{Limites du paradigme batch}
+
+Le paradigme dominant en HAR — collecter un corpus, entraîner offline, figer les
+poids — suppose une distribution stationnaire. Or en déploiement, trois sources de
+non-stationnarité apparaissent presque toujours : (1)~\emph{variabilité inter-sujets}
+(morphologie, habitudes, placement du capteur) ; (2)~\emph{évolution du contexte}
+(nouvelles activités, changement d'appareil) ; (3)~\emph{dérive temporelle} (fatigue,
+pathologie, saison). Réentraîner périodiquement sur tout l'historique est coûteux
+en calcul, en stockage et en privacy : les données brutes ne peuvent pas rester
+indéfiniment sur le serveur.
+
+\subsection{Oubli catastrophique en pratique}
+
+Quand on fine-tune séquentiellement sujet par sujet — exactement ce que simule
+notre protocole 44 tâches — la accuracy chute de 91~\% (joint training) à 62~\%
+sans mécanisme anti-oubli (chapitre~6). EWC et iCaRL améliorent la situation mais
+ne priorisent pas les exemples « à risque » près des frontières de décision. UWR
+comble ce gap en guidant le tampon de 2\,000 exemples vers les fenêtres incertaines.
+
+\subsection{Anticipation vs classification instantanée}
+
+La plupart des publications HAR optimisent l'accuracy sur la fenêtre courante.
+Or les cas d'usage sécurité (chute, sortie de zone sûre) demandent d'agir \emph{avant}
+le changement complet d'activité. La littérature vidéo \parencite{ryoo2011,gammulle2019}
+traite l'early recognition ; peu d'articles IMU combinent anticipation et CL.
+Dans \texttt{har\_project}, nous implémentons une anticipation multi-classe
+(prédire la classe suivante depuis $S=5$ fenêtres tronquées à
+$p\in\{25,50,75\}\%$), filtrée sur les transitions (\texttt{transitions\_only}).
+Cette tâche atteint un macro-F1 de validation d'environ 0,60--0,64
+(baseline majorité $\approx$ 0,04). Un module fall-risk binaire complète
+l'axe sécurité (macro-F1 $\approx$ 0,88 sur transitions posturales).
+
+\section{Approche proposée — vue d'ensemble}
+
+Le système \texttt{HARContinualModel} s'organise en trois couches :
+\begin{enumerate}
+  \item \textbf{Backbone partagé} : \texttt{IMUTransformerEncoder} pré-entraîné
+  sur HAPT ou fusion multi-jeux ; embeddings 128-D via token CLS ;
+  initialisation SSL optionnelle (\texttt{ssl\_backbone.pt}).
+  \item \textbf{Module CL (UWR)} : tampon pondéré par entropie MC, prototypes par
+  classe, perte contrastive ; scénarios user- et class-incremental.
+  \item \textbf{Modules auxiliaires} : tête anticipation LSTM multi-classe,
+  adaptateur CORAL, fall-risk + heuristique physique, calibration online,
+  bandit de seuil, pipeline foundation-style.
+\end{enumerate}
+
+Cette modularité permet d'évaluer chaque brique indépendamment (ablations chapitre~6)
+tout en partageant les représentations apprises.
+
+\section{Organisation du document}
+
+Le \textbf{chapitre~1} pose le vocabulaire HAR, capteurs, pipelines classiques et
+deep learning. Le \textbf{chapitre~2} formalise l'apprentissage continu (oubli,
+EWC, replay, métriques). Le \textbf{chapitre~3} compare les travaux récents HAR+CL
+et identifie les lacunes (anticipation, embarqué, protocoles).
+
+Le \textbf{chapitre~4} décrit la conception : formalisation mathématique, UWR,
+anticipation LSTM, SSL/foundation-style, calibration, RL léger et fall-risk.
+Le \textbf{chapitre~5} détaille l'implémentation Python (\texttt{har\_project/}).
+Le \textbf{chapitre~6} présente l'évaluation complète avec figures, tableaux et
+analyse des limites.
+
+Les \textbf{annexes} documentent les datasets, hyperparamètres, résultats étendus,
+extraits de code et fiches bibliographiques pour la reproductibilité. L'annexe~A
+détaille HAPT/WISDM/PAMAP2 ; les annexes~B à~H couvrent protocoles, figures
+commentées, code UWR, fiches articles, tableaux par classe, mathématiques, synthèse
+expérimentale et jalons du projet.
+

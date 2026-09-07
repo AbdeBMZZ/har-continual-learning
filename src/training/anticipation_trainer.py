@@ -4,11 +4,16 @@ Training and evaluation loop for the activity anticipation head (Module 2).
 The backbone is FROZEN during anticipation training — we only train
 the LSTM head on top of the pre-trained backbone embeddings.
 This keeps the shared representation intact for continual learning.
+
+Improvements vs baseline:
+  - inverse-frequency class weights in CrossEntropy
+  - restore best anticipation_head weights by val macro-F1
 """
 
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+import copy
+from typing import Dict, Optional
 
 import numpy as np
 import torch
@@ -24,25 +29,24 @@ from ..evaluation.metrics import macro_f1
 def train_anticipation(
     model:       HARContinualModel,
     datasets:    dict,          # {obs_ratio: (train_ds, val_ds)}
-    n_epochs:    int   = 30,
+    n_epochs:    int   = 50,
     batch_size:  int   = 64,
     lr:          float = 5e-4,
     device:      str   = "cpu",
     verbose:     bool  = True,
+    use_class_weights: bool = True,
+    n_classes:   Optional[int] = None,
 ) -> Dict[float, Dict]:
     """
     Train the anticipation head for each observation ratio.
 
     Backbone weights are FROZEN. Only anticipation_head parameters
-    are updated.
-
-    Returns:
-        {obs_ratio: {'history': {...}, 'val_f1': float, 'val_acc': float}}
+    are updated. Best head (by val macro-F1) is restored at the end
+    of each ratio run.
     """
     device = torch.device(device)
     model  = model.to(device)
 
-    # Freeze backbone and HAR head — only train anticipation head
     for p in model.backbone.parameters():
         p.requires_grad = False
     for p in model.har_head.parameters():
@@ -51,6 +55,9 @@ def train_anticipation(
         p.requires_grad = True
 
     results = {}
+    best_overall_f1 = -1.0
+    best_overall_state = None
+    best_overall_ratio = None
 
     for obs_ratio, (train_ds, val_ds) in datasets.items():
         if verbose:
@@ -64,9 +71,16 @@ def train_anticipation(
             continue
 
         majority_f1 = val_ds.majority_baseline()
-
-        # Re-init anticipation head weights for each ratio
         _reinit_head(model.anticipation_head)
+
+        weight = None
+        if use_class_weights and len(train_ds) > 0:
+            weight = train_ds.class_weights(n_classes=n_classes).to(device)
+            if verbose:
+                present = (weight > 0).sum().item()
+                print(f"  Class weights: {present} classes, "
+                      f"min={weight[weight > 0].min():.3f} "
+                      f"max={weight.max():.3f}")
 
         optimizer = AdamW(model.anticipation_head.parameters(),
                           lr=lr, weight_decay=1e-4)
@@ -77,22 +91,23 @@ def train_anticipation(
         val_loader   = val_ds.dataloader(batch_size=batch_size, shuffle=False)
 
         history = {"train_loss": [], "val_loss": [], "val_f1": [], "val_acc": []}
+        best_f1 = -1.0
+        best_acc = 0.0
+        best_state = None
 
         for epoch in range(1, n_epochs + 1):
-            # ---- Train ----
             model.train()
-            # Keep backbone in eval mode (frozen)
             model.backbone.eval()
             model.har_head.eval()
 
             epoch_losses = []
             for X_seq, y_next in train_loader:
-                X_seq  = X_seq.to(device)   # (B, S, obs_len, C)
+                X_seq  = X_seq.to(device)
                 y_next = y_next.to(device)
 
                 optimizer.zero_grad()
                 logits = model.anticipate(X_seq)
-                loss   = F.cross_entropy(logits, y_next)
+                loss   = F.cross_entropy(logits, y_next, weight=weight)
                 loss.backward()
                 nn.utils.clip_grad_norm_(
                     model.anticipation_head.parameters(), max_norm=1.0)
@@ -101,14 +116,19 @@ def train_anticipation(
 
             scheduler.step()
 
-            # ---- Validate ----
             val_loss, val_f1, val_acc = _eval_anticipation(
                 model, val_loader, device)
 
-            history["train_loss"].append(np.mean(epoch_losses))
+            history["train_loss"].append(float(np.mean(epoch_losses)))
             history["val_loss"].append(val_loss)
             history["val_f1"].append(val_f1)
             history["val_acc"].append(val_acc)
+
+            if val_f1 > best_f1:
+                best_f1 = val_f1
+                best_acc = val_acc
+                best_state = copy.deepcopy(
+                    model.anticipation_head.state_dict())
 
             if verbose and (epoch % 5 == 0 or epoch == 1):
                 print(f"  epoch {epoch:3d}/{n_epochs} | "
@@ -117,8 +137,9 @@ def train_anticipation(
                       f"val_F1={val_f1:.4f} | "
                       f"val_acc={val_acc:.4f}")
 
-        best_f1  = max(history["val_f1"])
-        best_acc = max(history["val_acc"])
+        if best_state is not None:
+            model.anticipation_head.load_state_dict(best_state)
+
         results[obs_ratio] = {
             "history": history,
             "val_f1":  best_f1,
@@ -129,7 +150,19 @@ def train_anticipation(
             print(f"  Best val F1={best_f1:.4f}  |  Best val acc={best_acc:.4f}"
                   f"  |  Majority baseline F1={majority_f1:.4f}")
 
-    # Unfreeze backbone for future continual learning
+        if best_f1 > best_overall_f1:
+            best_overall_f1 = best_f1
+            best_overall_ratio = obs_ratio
+            best_overall_state = copy.deepcopy(
+                model.anticipation_head.state_dict())
+
+    # Restore the globally best head for the saved checkpoint
+    if best_overall_state is not None:
+        model.anticipation_head.load_state_dict(best_overall_state)
+        if verbose:
+            print(f"\nRestored best head (p={best_overall_ratio}, "
+                  f"F1={best_overall_f1:.4f}) for checkpoint.")
+
     for p in model.backbone.parameters():
         p.requires_grad = True
     for p in model.har_head.parameters():
