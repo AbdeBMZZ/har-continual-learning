@@ -502,20 +502,19 @@ pas au code livré et ne sont plus rapportés comme résultat reproductible.
 
 \section{Conclusion}
 
-Ce chapitre a présenté les choix d'implémentation pour concrétiser l'architecture
-du Chapitre~4. Chaque composant — backbone Transformer, tampon UWR, module
-d'anticipation LSTM, fall-risk, SSL/foundation-style, calibration+RL,
-\texttt{DomainAdapter} — est un module Python indépendant. Les expériences
-valident l'UWR et le transfert cross-dataset ; l'anticipation multi-classe
-atteint $\approx$0,60--0,64 de macro-F1. Le chapitre suivant présente
-l'évaluation systématique.
+Le chapitre~4 est maintenant incarné dans des modules Python séparés : backbone,
+UWR, anticipation, fall-risk, SSL, calibration, bandit et
+\texttt{DomainAdapter}. Les runs confirment surtout UWR et le diagnostic
+cross-dataset ; l'anticipation multi-classe se situe autour de 0,60--0,64 de
+macro-F1. Le chapitre suivant regarde les chiffres de plus près.
 
-\subsection{Retour d'expérience implémentation}
+\subsection{Retour d'expérience}
 
-Trois décisions d'ingénierie ont accéléré le développement : (1)~interface commune
-\texttt{ReplayBuffer} / \texttt{UncertaintyWeightedReplayBuffer} pour baselines
-AB ; (2)~gel du backbone pendant les premières expériences d'anticipation pour
-isoler la tête ; (3)~script unique \texttt{regenerate\_figures.sh} pour éviter
-les figures manuelles obsolètes. Le backend MPS (Apple Silicon) a divisé par
-deux le temps de pré-train vs CPU ; les runs 44 tâches restent overnight ($\sim$8h)
-— argument pour checkpoints intermédiaires documentés en annexe~H.
+Quelques choix ont simplifié le travail. Une interface commune
+\texttt{ReplayBuffer} / \texttt{UncertaintyWeightedReplayBuffer} a permis de
+comparer les baselines sans tout réécrire. Geler le backbone au début des
+expériences d'anticipation a isolé la tête LSTM. Un script de régénération
+des figures évite les captures obsolètes. Sur Apple Silicon (MPS), le
+pré-entraînement est nettement plus rapide qu'en CPU ; les runs à 44 tâches
+restent longs (de l'ordre d'une nuit), d'où l'intérêt des checkpoints
+intermédiaires.

@@ -5,17 +5,21 @@
 
 \section{Introduction}
 
-La conception d'un système intelligent de reconnaissance d'activités humaines capable de s'adapter continuellement aux évolutions de son environnement constitue le cœur de ce travail. Les chapitres précédents ont mis en évidence deux insuffisances majeures des approches classiques : d'une part, leur incapacité à maintenir leurs performances face à l'arrivée de nouveaux utilisateurs ou de nouvelles activités sans réentraîner le modèle depuis le début — phénomène connu sous le nom d'oubli catastrophique — et d'autre part, leur caractère purement réactif, se limitant à reconnaître une activité en cours sans anticiper les transitions imminentes.
+Les chapitres précédents ont montré deux limites récurrentes. D'abord, un
+modèle HAR classique oublie vite ce qu'il savait dès qu'on lui présente de
+nouveaux utilisateurs ou de nouvelles activités. Ensuite, la plupart des
+systèmes se contentent de reconnaître l'activité en cours : ils n'anticipent
+pas une transition.
 
-Pour répondre à ces défis, nous proposons une architecture articulée autour d'un
-backbone Transformer partagé et de deux modules spécialisés : un module de
-reconnaissance continue, fondé sur un tampon de rejeu pondéré par l'incertitude
-épistémique (UWR), et un module d'anticipation multi-classe (tête LSTM) qui
-prédit l'activité suivante à partir de fenêtres partielles. Cette conception
-tire parti des représentations apprises par le Transformer pour alimenter
-simultanément la reconnaissance adaptative et la prédiction temporelle.
+Nous répondons avec un Transformer partagé et deux modules autour. Le premier
+fait de la reconnaissance continue grâce à un tampon de rejeu pondéré par
+l'incertitude de prédiction (UWR). Le second anticipe l'activité suivante
+avec une tête LSTM sur des fenêtres partielles. Les représentations apprises
+par le backbone servent aux deux.
 
-Ce chapitre est organisé comme suit. La section 4.2 formalise le problème et définit les scénarios d'apprentissage retenus ainsi que les contraintes de déploiement. La section 4.3 énonce les objectifs et contributions principales du projet. La section 4.4 présente les jeux de données utilisés et le pipeline d'homogénéisation. La section 4.5 décrit l'architecture globale du système. Les sections 4.6 et 4.7 détaillent respectivement la conception du module de reconnaissance continue et du module d'anticipation. Enfin, la section 4.8 définit le protocole d'évaluation.
+Le reste du chapitre formalise le problème et les scénarios, fixe les
+objectifs, présente les données, décrit l'architecture, puis détaille UWR,
+l'anticipation et le protocole d'évaluation.
 
 \section{Définition et formulation du problème}
 
@@ -57,19 +61,20 @@ Contrainte de stabilité. Les mises à jour du modèle doivent être incrémenta
 
 \subsection{Positionnement par rapport à l'état de l'art}
 
-L'analyse des travaux existants présentée au Chapitre 3 révèle plusieurs lacunes que notre approche cherche à combler :
+Par rapport à iCaRL, qui choisit surtout des exemplaires proches des
+prototypes, UWR privilégie les fenêtres où le modèle hésite. L'idée est
+simple : ce sont souvent ces points, près des frontières, qu'il faut
+réviser pour ne pas les perdre trop vite.
 
-Sur l'estimation d'incertitude dans le rejeu. Les méthodes existantes comme iCaRL (Rebuffi et al., 2017) utilisent une sélection d'exemples représentatifs basée sur la proximité aux prototypes de classe. Notre approche, en revanche, privilégie les exemples à forte incertitude épistémique, c'est-à-dire ceux sur lesquels le modèle est le moins sûr. Cette distinction est fondamentale : les exemples proches des frontières de décision apportent plus d'information pour maintenir ces frontières lors des futures mises à jour.
+Sur l'anticipation, nous gardons une formulation multi-classe classique
+(classe suivante depuis des fenêtres partielles, filtre
+\texttt{transitions\_only}). Le déséquilibre des transitions rend la tâche
+difficile ; le chapitre~6 montre néanmoins un macro-F1 nettement au-dessus
+d'une baseline majorité.
 
-Sur l'anticipation d'activités pour la HAR. La majorité des travaux d'anticipation
-en HAR traitent le problème comme une prédiction multi-classes de l'activité
-suivante (Ryoo, 2011 ; Gammulle et al., 2019). C'est aussi la formulation
-retenue ici : une tête LSTM prédit la classe suivante depuis une séquence de
-fenêtres partielles, en ne retenant que les paires où le label change
-(\texttt{transitions\_only}). Cette tâche souffre d'un déséquilibre sévère ;
-les résultats (chapitre~6) montrent un macro-F1 proche du hasard.
-
-Sur l'adaptation de domaine avec backbone pré-entraîné. Les travaux sur CORAL (Sun \& Saenko, 2016) appliquent l'alignement de covariance soit sur des représentations de bas niveau, soit sur des modèles entraînés de zéro. Nous montrons que l'application de CORAL sur les embeddings d'un Transformer pré-entraîné amplifie significativement les gains, notamment en présence d'étiquettes cibles partielles.
+Pour le cross-dataset, plutôt qu'un alignement de covariance type CORAL
+dans le code livré, nous utilisons un adaptateur affine few-shot
+(\texttt{DomainAdapter}) sur les embeddings du Transformer gelé.
 
 \section{Objectifs du projet et contributions principales}
 
@@ -87,7 +92,9 @@ Objectif 5 : Détection de chutes hybride. Intégrer un module complémentaire d
 
 Les contributions scientifiques et techniques originales de ce travail sont :
 
-(C1) Uncertainty-Weighted Replay (UWR) : stratégie de sélection et d'échantillonnage d'exemples dans le tampon de rejeu basée sur l'entropie de la prédiction softmax (une passe, paramètre $\alpha$). À notre connaissance, c'est la première application de cette stratégie au contexte HAR continu.
+(C1) Uncertainty-Weighted Replay (UWR) : sélection et échantillonnage du
+tampon selon l'entropie softmax (une passe, paramètre $\alpha$), appliqué
+au HAR continu.
 
 (C2) Module d'anticipation multi-classe sur fenêtres partielles : tête LSTM
 entraînée sur le backbone gelé, contexte $S=5$ fenêtres tronquées à
@@ -313,13 +320,12 @@ contre une baseline majorité d'environ 0,04. La tâche reste non triviale
 (transitions rares, déséquilibre, split par sujet), mais nettement au-dessus
 du niveau hasard/majorité.
 
-\section{Modules complémentaires alignés sur la fiche PFE}
+\section{Modules complémentaires}
 
-La fiche PFE (code~26/2755) mentionne explicitement l'auto-supervision, les
-modèles de type fondation, la calibration en ligne, l'apprentissage
-séquentiel / renforcement, l'anticipation d'une perte d'équilibre et des
-exemples d'activités domestiques (repas). Cette section formalise les
-modules ajoutés pour couvrir ces orientations, avec des limites assumées.
+La fiche mentionnait aussi l'auto-supervision, un prétrain de type fondation,
+la calibration en ligne, un peu de renforcement, l'anticipation d'un déséquilibre
+et des activités domestiques comme la préparation d'un repas. Voici ce que
+nous avons réellement ajouté, avec les limites qui vont avec.
 
 \subsection{Pré-entraînement auto-supervisé (SSL)}
 
@@ -503,16 +509,12 @@ AUC-ROC : aire sous la courbe ROC, utilisée pour la détection de chutes et l'a
 
 \section{Module auxiliaire — risque de chute et alerte}
 
-La fiche PFE demande d'anticiper une perte d'équilibre pour déclencher une
-alerte préventive. Notre conception combine :
-\begin{itemize}
-  \item \textbf{FallRiskHead} : tête LSTM binaire prédisant une transition
-  posturale à risque (labels 9--12) depuis un contexte partiel ;
-  \item \textbf{PhysicalFallDetector} : heuristique pic d'accélération puis
-  phase calme (démo / couche sécurité) ;
-  \item \textbf{ThresholdBandit + OnlineCalibrator} : adaptation du seuil
-  d'alerte et recalibrage des confidences en ligne.
-\end{itemize}
+Pour l'alerte préventive, on combine trois éléments. Une tête LSTM binaire
+(\texttt{FallRiskHead}) indique si la prochaine activité est une transition
+posturale à risque (labels 9--12). Une heuristique physique
+(\texttt{PhysicalFallDetector}) repère un pic d'accélération suivi d'une
+phase calme. Enfin, un bandit de seuil et une calibration de température
+ajustent l'alerte en ligne.
 
 \subsection{Métriques cibles}
 
@@ -524,23 +526,8 @@ reste documenté comme baseline complémentaire.
 
 \section{Conclusion}
 
-Ce chapitre a présenté la conception du système HAR adaptatif et continu.
-L'architecture à backbone Transformer partagé mutualise les représentations
-entre la reconnaissance continue (UWR + prototypes) et l'anticipation
-multi-classe (LSTM sur fenêtres partielles). UWR exploite l'incertitude
-(entropie softmax) pour guider le tampon de rejeu. L'anticipation
-multi-classe atteint un macro-F1 d'environ 0,60--0,64. Les modules SSL,
-foundation-style, calibration online, bandit de seuil et fall-risk alignent
-la conception sur la fiche PFE.
-
-Le chapitre suivant présente l'implémentation concrète de ces composants, les
-choix d'ingénierie effectués et les détails de configuration des expériences.
-
-\subsection{Synthèse des choix de conception}
-
-Retenir : (1)~backbone partagé ; (2)~UWR (tampon 2\,000) ; (3)~anticipation
-LSTM multi-classe sur fenêtres partielles (filtre transitions) ; (4)~CORAL
-avec labels cibles partiels ; (5)~SSL / foundation-style optionnels ;
-(6)~calibration + bandit de seuil ; (7)~fall-risk binaire ; (8)~protocoles CL
-user (sujets triés) et class ($2$ classes/tâche). L'évaluation chapitre~6
-valide ces choix.
+En résumé, le système repose sur un Transformer partagé, UWR pour l'apprentissage
+continu, et une anticipation LSTM sur fenêtres partielles. Autour, SSL léger,
+adaptateur de domaine, calibration, bandit de seuil et fall-risk complètent
+le dispositif sans le surcharger. Le chapitre suivant décrit comment tout
+cela est codé et entraîné.

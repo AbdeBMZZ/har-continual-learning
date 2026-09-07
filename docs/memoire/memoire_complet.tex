@@ -380,62 +380,61 @@ de ce projet, nous adressons notre plus sincère reconnaissance.
 \mychapter{0}{Résumé}
 
 
-Les capteurs inertiels des smartphones et montres permettent de reconnaître les
-activités humaines (HAR), avec des applications en santé et assistance. Un modèle
-entraîné une seule fois sur des données de laboratoire peine pourtant à suivre de
-nouveaux utilisateurs ou contextes : c'est l'oubli catastrophique. Par ailleurs,
-peu de systèmes anticipent une transition avant qu'elle ne se produise.
+Les smartphones et montres connectées embarquent des capteurs inertiels qui
+permettent de reconnaître ce que fait une personne : marcher, monter des
+escaliers, s'asseoir, etc. En pratique, un modèle entraîné une fois en
+laboratoire se dégrade dès qu'un nouvel utilisateur arrive ou que le contexte
+change. C'est l'oubli catastrophique. Peu de systèmes, en outre, cherchent à
+anticiper une transition avant qu'elle ne soit complète.
 
-Ce mémoire propose une architecture HAR adaptative et continue, alignée sur la
-fiche PFE~26/2755. Après un état de l'art, nous décrivons un backbone Transformer
-partagé, la reconnaissance continue avec Uncertainty-Weighted Replay (UWR),
-l'anticipation multi-classe (tête LSTM sur fenêtres partielles), plus des modules
-complémentaires : SSL SimCLR-style, pipeline foundation-style, calibration de
-confiance en ligne, bandit de seuil (RL léger) et fall-risk binaire. L'évaluation
-sur HAPT et WISDM montre des gains nets par rapport à EWC, iCaRL et finetuning
-naïf (+16,8 points macro-F1 en user-incrémental). L'anticipation multi-classe
-atteint un macro-F1 de validation d'environ 0,60--0,64 (baseline majorité
-$\approx$ 0,04) ; le fall-risk binaire atteint environ 0,88.
+Nous proposons ici une architecture HAR qui apprend de façon continue et qui
+peut aussi prédire l'activité suivante à partir de fenêtres partielles. Le
+cœur du système est un Transformer partagé, un tampon de rejeu guidé par
+l'incertitude de prédiction (UWR), et une tête LSTM d'anticipation. Sur
+HAPT et WISDM, UWR gagne environ 16,8 points de macro-F1 face au finetuning
+naïf en scénario user-incrémental, et dépasse EWC et iCaRL sur nos protocoles.
+L'anticipation multi-classe atteint un macro-F1 de validation d'environ
+0,60--0,64 (contre $\approx$0,04 pour une baseline majorité). Un module
+binaire de risque postural (fall-risk) monte à environ 0,88.
 
-Le système \texttt{har\_project} comprend plus de 531\,000 paramètres pour le
-backbone, un tampon de rejeu de 2\,000 fenêtres, et des modules d'adaptation de domaine, SSL,
-calibration, fall-risk et bandit de seuil. Les expériences couvrent le
-pré-entraînement (91,3~\% accuracy HAPT), l'adaptation 44 sujets (F1 0,543),
-le class-incrémental six tâches, l'anticipation LSTM (macro-F1 $\approx$0,60--0,64),
-le fall-risk binaire ($\approx$0,88), et l'adaptation cross-dataset (\texttt{DomainAdapter})
-(F1 0,46). Le scénario « préparation de repas » reste hors portée faute de
-corpus cuisine. Les annexes documentent datasets, hyperparamètres, code et
-fiches bibliographiques pour faciliter la reproduction.
+Le code (\texttt{har\_project}) contient aussi un pré-entraînement SSL léger,
+un adaptateur de domaine affine, une calibration de confiance en ligne et un
+petit bandit de seuil d'alerte. Le backbone fait environ 531\,K paramètres ;
+le tampon de rejeu est limité à 2\,000 fenêtres. Le transfert HAPT vers WISDM
+reste difficile (F1 $\approx$0,46 en zéro-shot). Nous n'avons pas de corpus
+cuisine pour le scénario « préparation de repas » évoqué dans la fiche de
+stage. Les annexes détaillent les données, les hyperparamètres et le code
+pour reproduire les expériences.
 
 \bigskip
 \noindent\textbf{Mots clés :} Reconnaissance d'activités humaines, apprentissage
 continu, capteurs inertiels, Transformer, Uncertainty-Weighted Replay, anticipation
-d'activités, auto-supervision, calibration en ligne.
+d'activités.
 
 \clearpage
 
 \mychapter{0}{Abstract}
 
 
-Human activity recognition (HAR) from IMUs on phones and wearables supports mobile
-health and assisted living. Models trained once on lab data often fail when new
-users or contexts appear — catastrophic forgetting. Few systems anticipate
-activity changes before they occur.
+Inertial sensors in phones and watches make it possible to recognise daily
+activities, but a model trained once on laboratory data usually degrades when
+new users or contexts appear. Few systems try to anticipate a transition
+before it is complete.
 
-This thesis presents an adaptive continual HAR architecture: a shared Transformer
-backbone, continual recognition with Uncertainty-Weighted Replay (UWR), and
-multi-class next-activity anticipation from partial windows (LSTM head, frozen
-backbone). Experiments on HAPT and WISDM show clear gains over EWC, iCaRL and
-naive fine-tuning (+16.8 macro-F1 points in user-incremental learning). Multi-class
-anticipation reaches validation macro-F1 $\approx$ 0.60--0.64 (majority baseline
-$\approx$ 0.04); binary fall-risk reaches $\approx$ 0.88. Complementary modules
-cover SSL, foundation-style pretraining, online calibration and a light threshold
-bandit (RL).
+This thesis describes a continual HAR system built around a shared Transformer,
+an uncertainty-weighted replay buffer (UWR), and an LSTM head that predicts the
+next activity from partial windows. On HAPT and WISDM, UWR improves macro-F1 by
+about 16.8 points over naive fine-tuning in the user-incremental setting and
+outperforms EWC and iCaRL in our protocols. Next-activity anticipation reaches
+validation macro-F1 around 0.60--0.64 (majority baseline $\approx$0.04). A
+binary postural fall-risk head reaches about 0.88. Lighter modules cover SSL
+pretraining, a domain adapter, online confidence calibration and a threshold
+bandit. Cross-dataset transfer remains hard (HAPT$\rightarrow$WISDM F1
+$\approx$0.46 zero-shot).
 
 \bigskip
 \noindent\textbf{Keywords:} Human activity recognition, continual learning, inertial
-sensors, Transformer, Uncertainty-Weighted Replay, activity anticipation,
-self-supervised learning, online calibration.
+sensors, Transformer, Uncertainty-Weighted Replay, activity anticipation.
 
 \clearpage
 
@@ -444,17 +443,16 @@ self-supervised learning, online calibration.
 \begin{otherlanguage}{arabic}
 \noindent
 \textarabic{%
-يعتمد التعرف على الأنشطة البشرية (HAR) من حساسات القصور الذاتي (IMU) في
-الهواتف والساعات على تطبيقات الصحة والمساعدة. النماذج المدرّبة مرة واحدة على
-بيانات مخبرية تفشل أمام مستخدمين أو سياقات جديدة (النسيان الكارثي)، وقليل
-منها يتوقع الانتقالات مسبقاً.}
+يمكن لحساسات القصور الذاتي في الهواتف والساعات التعرف على الأنشطة اليومية،
+لكن النموذج المدرّب مرة واحدة على بيانات مخبرية يتراجع أمام مستخدمين أو سياقات
+جديدة، وقليل من الأنظمة يتوقع الانتقال قبل اكتماله.}
 
 \bigskip
 \noindent
 \textarabic{%
-يقترح هذا المذكّر بنية HAR تكيفية ومستمرة: عمود فقري Transformer،
-تعرف مستمر بـ UWR، وتوقع متعدد الأصناف عبر رأس LSTM على نوافذ جزئية.
-التجارب على HAPT و WISDM تظهر مكاسب واضحة مقارنة بـ EWC و iCaRL والضبط البسيط.}
+يصف هذا المذكّر نظام HAR مستمراً يعتمد على Transformer مشترك، وإعادة تشغيل
+مرجّحة بعدم اليقين (UWR)، ورأس LSTM لتوقع النشاط التالي. التجارب على HAPT
+وWISDM تُظهر تحسناً واضحاً مقارنة بالضبط البسيط وEWC وiCaRL.}
 
 \bigskip
 \noindent\textbf{\textarabic{الكلمات المفتاحية:}}
@@ -465,7 +463,6 @@ Transformer، UWR، توقع النشاط.}
 
 \addcontentsline{toc}{chapter}{ملخص}
 
-\clearpage
 % ===== END include: 03-Resume.tex =====
 
 
@@ -715,102 +712,80 @@ Réseau antagoniste génératif \\
 \label{chap:introduction}
 
 Reconnaître une activité à partir d'un accéléromètre ou d'un gyroscope dans un
-téléphone ou une montre, c'est devenu courant — pour le sport, la santé, l'aide
-à domicile. Le modèle classique reste pourtant le même : on collecte des données
-en laboratoire, on entraîne un réseau une fois, on déploie. Dès qu'un nouvel
-utilisateur arrive, que le capteur change de place ou qu'une activité inédite
-apparaît, les performances chutent. Réentraîner tout depuis zéro coûte cher ;
-finetuner naïvement fait oublier ce qui marchait avant. Et dans la majorité
-des systèmes, on ne fait que classifier l'instant présent, sans prévenir la
-transition qui arrive.
+téléphone ou une montre est devenu courant, que ce soit pour le sport, la santé
+ou l'aide à domicile. La manière habituelle de procéder reste simple : on
+collecte des données en laboratoire, on entraîne un réseau une fois, puis on
+déploie. Dès qu'un nouvel utilisateur arrive, que le capteur change de place
+ou qu'une activité inédite apparaît, les performances chutent. Tout réapprendre
+depuis zéro coûte cher ; un finetuning naïf fait souvent oublier ce qui
+marchait. Et la plupart des systèmes se contentent de classer l'instant
+présent, sans prévenir une transition qui s'annonce.
 
-Ce mémoire part de ce constat. Nous proposons un système de HAR qui (1) apprend
-de façon continue quand de nouveaux utilisateurs ou classes arrivent, et (2)
-détecte tôt les changements d'activité. L'implémentation s'appuie sur le projet
-\texttt{har\_project} : backbone Transformer, tampon de rejeu guidé par
-l'incertitude (UWR), anticipation multi-classe de l'activité suivante via une
-tête LSTM sur fenêtres partielles, plus des modules d'adaptation de domaine, SSL,
-foundation-style, calibration, bandit de seuil et fall-risk.
+Ce mémoire part de ce constat. Nous construisons un système de HAR capable
+d'apprendre au fil de l'eau quand de nouveaux utilisateurs ou de nouvelles
+classes arrivent, et capable aussi de détecter tôt un changement d'activité.
+L'implémentation vit dans le dépôt \texttt{har\_project} : un backbone
+Transformer, un tampon de rejeu guidé par l'incertitude (UWR), une
+anticipation multi-classe via une tête LSTM sur fenêtres partielles, un
+adaptateur de domaine léger et un module de risque postural.
 
-\textbf{Partie I} (chapitres 1 à 3) pose le contexte : fondements HAR, concepts
-d'apprentissage continu, revue des travaux proches et lacunes identifiées.
-
-\textbf{Partie II} (chapitres 4 à 6) décrit la conception, l'implémentation et
-l'évaluation de notre solution, avec comparaisons aux baselines EWC, iCaRL et
-finetuning séquentiel.
-
-Les chapitres suivants détaillent chaque brique ; la conclusion générale en
-synthétise les résultats et les perspectives.
+La première partie (chapitres~1 à~3) rappelle les bases de la HAR, les idées
+de l'apprentissage continu et les travaux proches. La seconde (chapitres~4
+à~6) décrit la conception, le code et les expériences, avec des comparaisons
+à EWC, iCaRL et au finetuning séquentiel. La conclusion reprend les chiffres
+et les limites.
 
 \section{Problématique détaillée}
 
 \subsection{Limites du paradigme batch}
 
-Le paradigme dominant en HAR — collecter un corpus, entraîner offline, figer les
-poids — suppose une distribution stationnaire. Or en déploiement, trois sources de
-non-stationnarité apparaissent presque toujours : (1)~\emph{variabilité inter-sujets}
-(morphologie, habitudes, placement du capteur) ; (2)~\emph{évolution du contexte}
-(nouvelles activités, changement d'appareil) ; (3)~\emph{dérive temporelle} (fatigue,
-pathologie, saison). Réentraîner périodiquement sur tout l'historique est coûteux
-en calcul, en stockage et en privacy : les données brutes ne peuvent pas rester
-indéfiniment sur le serveur.
+Collecter un corpus, entraîner offline et figer les poids suppose une
+distribution à peu près stable. En déploiement, ce n'est presque jamais le
+cas. Les gens bougent différemment, le téléphone n'est pas toujours au même
+endroit, de nouvelles activités apparaissent, et les signaux dérivent avec le
+temps. Réentraîner périodiquement sur tout l'historique est coûteux, et les
+données brutes ne peuvent pas toujours rester sur un serveur.
 
 \subsection{Oubli catastrophique en pratique}
 
-Quand on fine-tune séquentiellement sujet par sujet — exactement ce que simule
-notre protocole 44 tâches — la accuracy chute de 91~\% (joint training) à 62~\%
-sans mécanisme anti-oubli (chapitre~6). EWC et iCaRL améliorent la situation mais
-ne priorisent pas les exemples « à risque » près des frontières de décision. UWR
-comble ce gap en guidant le tampon de 2\,000 exemples vers les fenêtres incertaines.
+Quand on fine-tune sujet par sujet --- comme dans notre protocole à 44 tâches
+--- l'accuracy tombe d'environ 91~\% (entraînement joint) à 62~\% sans
+mécanisme anti-oubli (chapitre~6). EWC et iCaRL aident, mais ne ciblent pas
+particulièrement les exemples près des frontières de décision. UWR oriente un
+tampon de 2\,000 fenêtres vers celles où le modèle est le plus incertain.
 
 \subsection{Anticipation vs classification instantanée}
 
-La plupart des publications HAR optimisent l'accuracy sur la fenêtre courante.
-Or les cas d'usage sécurité (chute, sortie de zone sûre) demandent d'agir \emph{avant}
-le changement complet d'activité. La littérature vidéo \parencite{ryoo2011,gammulle2019}
-traite l'early recognition ; peu d'articles IMU combinent anticipation et CL.
-Dans \texttt{har\_project}, nous implémentons une anticipation multi-classe
-(prédire la classe suivante depuis $S=5$ fenêtres tronquées à
-$p\in\{25,50,75\}\%$), filtrée sur les transitions (\texttt{transitions\_only}).
-Le macro-F1 de validation atteint environ 0,60--0,64 selon $p$ (baseline majorité $\approx$ 0,04).
+Beaucoup de travaux HAR cherchent surtout une bonne accuracy sur la fenêtre
+courante. Pour la sécurité (chute, sortie d'une zone sûre), il faudrait
+parfois agir avant que le mouvement soit terminé. La littérature vidéo
+\parencite{ryoo2011,gammulle2019} parle d'early recognition ; côté IMU, peu
+d'articles mêlent anticipation et apprentissage continu. Dans
+\texttt{har\_project}, on prédit la classe suivante à partir de $S=5$
+fenêtres tronquées à $p\in\{25,50,75\}\%$, en ne gardant que les transitions.
+On obtient un macro-F1 de validation d'environ 0,60--0,64 (baseline majorité
+$\approx$0,04). Un score binaire de risque postural complète ce volet
+(macro-F1 $\approx$0,88).
 
-\section{Approche proposée — vue d'ensemble}
+\section{Approche proposée}
 
-Le système \texttt{HARContinualModel} s'organise en trois couches :
-\begin{enumerate}
-  \item \textbf{Backbone partagé} : \texttt{IMUTransformerEncoder} pré-entraîné
-  sur HAPT ou fusion multi-jeux ; embeddings 128-D via token CLS.
-  \item \textbf{Module CL (UWR)} : tampon pondéré par entropie MC, prototypes par
-  classe, perte contrastive ; scénarios user- et class-incremental.
-  \item \textbf{Modules auxiliaires} : tête anticipation LSTM multi-classe,
-  adaptateur de domaine (\texttt{DomainAdapter}), fall-risk, calibration online, bandit de seuil,
-  SSL / foundation-style.
-\end{enumerate}
-
-Cette modularité permet d'évaluer chaque brique indépendamment (ablations chapitre~6)
-tout en partageant les représentations apprises.
+Le modèle \texttt{HARContinualModel} s'appuie sur un encodeur Transformer
+pré-entraîné (embeddings 128-D via un token CLS ; une initialisation SSL est
+possible). L'apprentissage continu repose sur UWR, des prototypes de classes
+et une perte contrastive, en scénarios user- et class-incremental. Autour de
+ce noyau, on trouve une tête d'anticipation LSTM, un \texttt{DomainAdapter},
+le fall-risk, une calibration de confiance en ligne et un petit bandit de
+seuil. Chaque brique peut être testée seule ; les ablations du chapitre~6
+s'en servent.
 
 \section{Organisation du document}
 
-Le \textbf{chapitre~1} pose le vocabulaire HAR, capteurs, pipelines classiques et
-deep learning. Le \textbf{chapitre~2} formalise l'apprentissage continu (oubli,
-EWC, replay, métriques). Le \textbf{chapitre~3} compare les travaux récents HAR+CL
-et identifie les lacunes (anticipation, embarqué, protocoles).
+Le chapitre~1 introduit le vocabulaire HAR et les pipelines classiques. Le
+chapitre~2 formalise l'apprentissage continu. Le chapitre~3 compare les
+travaux récents et pointe ce qui manque encore. Les chapitres~4 à~6
+couvrent la conception, l'implémentation Python et l'évaluation. Les annexes
+rassemblent datasets, hyperparamètres, extraits de code et fiches de lecture.
 
-Le \textbf{chapitre~4} décrit la conception : formalisation mathématique, UWR,
-anticipation LSTM, SSL/foundation-style, calibration, RL léger et fall-risk.
-Le \textbf{chapitre~5} détaille l'implémentation Python (\texttt{har\_project/}).
-Le \textbf{chapitre~6} présente l'évaluation complète avec figures, tableaux et
-analyse des limites.
-
-Les \textbf{annexes} documentent les datasets, hyperparamètres, résultats étendus,
-extraits de code et fiches bibliographiques pour la reproductibilité. L'annexe~A
-détaille HAPT/WISDM/PAMAP2 ; les annexes~B à~H couvrent protocoles, figures
-commentées, code UWR, fiches articles, tableaux par classe, mathématiques, synthèse
-expérimentale et jalons du projet.
-
-
-\clearpage
 % ===== END include: 05-Introduction.tex =====
 
 
@@ -2129,7 +2104,6 @@ formalise la réponse proposée.
 
 
 % ===== BEGIN include: 09-Conception.tex =====
-\clearpage
 \part{Contribution et Évaluation}
 
 \chapter{Conception de la solution}
@@ -2137,17 +2111,21 @@ formalise la réponse proposée.
 
 \section{Introduction}
 
-La conception d'un système intelligent de reconnaissance d'activités humaines capable de s'adapter continuellement aux évolutions de son environnement constitue le cœur de ce travail. Les chapitres précédents ont mis en évidence deux insuffisances majeures des approches classiques : d'une part, leur incapacité à maintenir leurs performances face à l'arrivée de nouveaux utilisateurs ou de nouvelles activités sans réentraîner le modèle depuis le début — phénomène connu sous le nom d'oubli catastrophique — et d'autre part, leur caractère purement réactif, se limitant à reconnaître une activité en cours sans anticiper les transitions imminentes.
+Les chapitres précédents ont montré deux limites récurrentes. D'abord, un
+modèle HAR classique oublie vite ce qu'il savait dès qu'on lui présente de
+nouveaux utilisateurs ou de nouvelles activités. Ensuite, la plupart des
+systèmes se contentent de reconnaître l'activité en cours : ils n'anticipent
+pas une transition.
 
-Pour répondre à ces défis, nous proposons une architecture articulée autour d'un
-backbone Transformer partagé et de deux modules spécialisés : un module de
-reconnaissance continue, fondé sur un tampon de rejeu pondéré par l'incertitude
-épistémique (UWR), et un module d'anticipation multi-classe (tête LSTM) qui
-prédit l'activité suivante à partir de fenêtres partielles. Cette conception
-tire parti des représentations apprises par le Transformer pour alimenter
-simultanément la reconnaissance adaptative et la prédiction temporelle.
+Nous répondons avec un Transformer partagé et deux modules autour. Le premier
+fait de la reconnaissance continue grâce à un tampon de rejeu pondéré par
+l'incertitude de prédiction (UWR). Le second anticipe l'activité suivante
+avec une tête LSTM sur des fenêtres partielles. Les représentations apprises
+par le backbone servent aux deux.
 
-Ce chapitre est organisé comme suit. La section 4.2 formalise le problème et définit les scénarios d'apprentissage retenus ainsi que les contraintes de déploiement. La section 4.3 énonce les objectifs et contributions principales du projet. La section 4.4 présente les jeux de données utilisés et le pipeline d'homogénéisation. La section 4.5 décrit l'architecture globale du système. Les sections 4.6 et 4.7 détaillent respectivement la conception du module de reconnaissance continue et du module d'anticipation. Enfin, la section 4.8 définit le protocole d'évaluation.
+Le reste du chapitre formalise le problème et les scénarios, fixe les
+objectifs, présente les données, décrit l'architecture, puis détaille UWR,
+l'anticipation et le protocole d'évaluation.
 
 \section{Définition et formulation du problème}
 
@@ -2189,19 +2167,20 @@ Contrainte de stabilité. Les mises à jour du modèle doivent être incrémenta
 
 \subsection{Positionnement par rapport à l'état de l'art}
 
-L'analyse des travaux existants présentée au Chapitre 3 révèle plusieurs lacunes que notre approche cherche à combler :
+Par rapport à iCaRL, qui choisit surtout des exemplaires proches des
+prototypes, UWR privilégie les fenêtres où le modèle hésite. L'idée est
+simple : ce sont souvent ces points, près des frontières, qu'il faut
+réviser pour ne pas les perdre trop vite.
 
-Sur l'estimation d'incertitude dans le rejeu. Les méthodes existantes comme iCaRL (Rebuffi et al., 2017) utilisent une sélection d'exemples représentatifs basée sur la proximité aux prototypes de classe. Notre approche, en revanche, privilégie les exemples à forte incertitude épistémique, c'est-à-dire ceux sur lesquels le modèle est le moins sûr. Cette distinction est fondamentale : les exemples proches des frontières de décision apportent plus d'information pour maintenir ces frontières lors des futures mises à jour.
+Sur l'anticipation, nous gardons une formulation multi-classe classique
+(classe suivante depuis des fenêtres partielles, filtre
+\texttt{transitions\_only}). Le déséquilibre des transitions rend la tâche
+difficile ; le chapitre~6 montre néanmoins un macro-F1 nettement au-dessus
+d'une baseline majorité.
 
-Sur l'anticipation d'activités pour la HAR. La majorité des travaux d'anticipation
-en HAR traitent le problème comme une prédiction multi-classes de l'activité
-suivante (Ryoo, 2011 ; Gammulle et al., 2019). C'est aussi la formulation
-retenue ici : une tête LSTM prédit la classe suivante depuis une séquence de
-fenêtres partielles, en ne retenant que les paires où le label change
-(\texttt{transitions\_only}). Cette tâche souffre d'un déséquilibre sévère ;
-les résultats (chapitre~6) montrent un macro-F1 d'environ 0,60--0,64, nettement au-dessus de la baseline majorité ($\approx$0,04).
-
-Sur l'adaptation de domaine avec backbone pré-entraîné. Les travaux sur CORAL (Sun \& Saenko, 2016) appliquent l'alignement de covariance soit sur des représentations de bas niveau, soit sur des modèles entraînés de zéro. Nous montrons que l'application de CORAL sur les embeddings d'un Transformer pré-entraîné amplifie significativement les gains, notamment en présence d'étiquettes cibles partielles.
+Pour le cross-dataset, plutôt qu'un alignement de covariance type CORAL
+dans le code livré, nous utilisons un adaptateur affine few-shot
+(\texttt{DomainAdapter}) sur les embeddings du Transformer gelé.
 
 \section{Objectifs du projet et contributions principales}
 
@@ -2219,7 +2198,9 @@ Objectif 5 : Détection de chutes hybride. Intégrer un module complémentaire d
 
 Les contributions scientifiques et techniques originales de ce travail sont :
 
-(C1) Uncertainty-Weighted Replay (UWR) : stratégie de sélection et d'échantillonnage d'exemples dans le tampon de rejeu basée sur l'entropie de la prédiction softmax (une passe, paramètre $\alpha$). À notre connaissance, c'est la première application de cette stratégie au contexte HAR continu.
+(C1) Uncertainty-Weighted Replay (UWR) : sélection et échantillonnage du
+tampon selon l'entropie softmax (une passe, paramètre $\alpha$), appliqué
+au HAR continu.
 
 (C2) Module d'anticipation multi-classe sur fenêtres partielles : tête LSTM
 entraînée sur le backbone gelé, contexte $S=5$ fenêtres tronquées à
@@ -2287,44 +2268,7 @@ L'architecture proposée est structurée autour d'un backbone partagé de type T
 
 Le flux de traitement global est le suivant : une fenêtre IMU brute $(T=150, C=6)$ est d'abord encodée par le backbone en un vecteur d'embedding de dimension $d=128$. Cet embedding est ensuite transmis soit au Module~1 (reconnaissance continue) pour la classification et la mise à jour incrémentale, soit au Module~2 (anticipation) pour la prédiction de l'activité suivante à partir de fenêtres partielles.
 
-
-% ===== BEGIN input: includes/tikz-har-system.tex =====
-%% Vue d'ensemble du système HARContinualModel (har_project)
-\begin{figure}[H]
-\centering
-\begin{tikzpicture}[
-  node distance=0.55cm and 0.9cm,
-  comp/.style={rectangle,rounded corners=3pt,draw=harblue!80!black,
-    fill=harlightblue!40,minimum width=2.6cm,minimum height=0.85cm,
-    align=center,font=\small\bfseries},
-  mod/.style={rectangle,rounded corners=3pt,draw=hargreen!70!black,
-    fill=harlightgreen!35,minimum width=2.5cm,minimum height=0.75cm,
-    align=center,font=\footnotesize},
-  arr/.style={-{Stealth[length=5pt]},line width=0.9pt,draw=harblue!70!black}
-]
-  \node[comp] (imu) {Capteurs\\IMU};
-  \node[comp,right=of imu] (prep) {Prétraitement\\(50 Hz, fenêtre 150)};
-  \node[comp,right=of prep] (bb) {Backbone\\Transformer};
-  \node[mod, below=0.65cm of bb,xshift=-1.6cm] (cl) {Module 1\\HAR + UWR};
-  \node[mod, below=0.65cm of bb,xshift=1.6cm] (ant) {Module 2\\Anticipation};
-  \node[mod, below=0.55cm of cl] (fall) {Chutes\\hybride};
-  \node[mod, below=0.55cm of ant] (coral) {Domain\\Adapter};
-  \draw[arr] (imu) -- (prep);
-  \draw[arr] (prep) -- (bb);
-  \draw[arr] (bb) -- (cl);
-  \draw[arr] (bb) -- (ant);
-  \draw[arr] (cl) -- (fall);
-  \draw[arr] (bb) -- (coral);
-\end{tikzpicture}
-\caption[Architecture globale du système proposé]{Architecture globale du système proposé :
-backbone Transformer partagé, module de reconnaissance continue (UWR),
-module d'anticipation LSTM, détection de chutes et adaptation CORAL
-(\texttt{har\_project/src/models/har\_model.py}).}
-\label{fig:system_overview}
-\end{figure}
-
-% ===== END input: includes/tikz-har-system.tex =====
-
+\input{includes/tikz-har-system}
 
 \subsection{Backbone Transformer}
 
@@ -2424,7 +2368,7 @@ Propriétés théoriques
 
 L'UWR converge vers un tampon dont la distribution marginale est concentrée sur les exemples à forte incertitude, c'est-à-dire près des frontières de décision. Lorsque le modèle évolue et que certaines frontières se déplacent, les exemples affectés voient leur incertitude augmenter, déclenchant leur priorisation dans les futurs lots de rejeu. Ce mécanisme crée une boucle de rétroaction qui guide activement le tampon vers les zones à risque d'oubli.
 
-\subsection{Calibration adaptative en ligne}
+\subsection{Calibration adaptative en ligne (prototypes)}
 
 Après chaque pas de gradient, les prototypes de toutes les classes présentes dans le lot courant sont recalibrés. Pour une classe $c$ présente dans le lot, l'embedding moyen du lot $\bar{\boldsymbol{e}}_c = \frac{1}{|\mathcal{B}_c|}\sum_{x \in \mathcal{B}_c} f_\theta(x)$ est calculé avec les nouveaux paramètres $\theta$ mis à jour. Le prototype est ensuite mis à jour selon la formule présentée en §4.6.1. Pour les classes absentes du lot courant, les prototypes sont conservés inchangés.
 
@@ -2455,8 +2399,8 @@ contexte partiel. Pour un indice $i$ :
 
 \begin{itemize}
   \item le contexte est la séquence de $S=5$ fenêtres
-  $X[i-S],\ldots,X[i-1]$, chacune tronquée aux \emph{derniers} $p\,\%$
-  ($p\in\{0{,}25,0{,}50,0{,}75\}$) — les indices de transition étant souvent en fin de fenêtre ;
+  $X[i-S],\ldots,X[i-1]$, chacune tronquée aux premiers $p\,\%$
+  ($p\in\{0{,}25,0{,}50,0{,}75\}$) ;
   \item la cible est le label $y[i]$ ;
   \item avec \texttt{transitions\_only=True}, on ne garde l'exemple que si
   $y[i]\neq y[i-1]$ ;
@@ -2465,7 +2409,7 @@ contexte partiel. Pour un indice $i$ :
   unidirectionnel (2 couches, hidden 128, dropout 0,2) ;
   \item le dernier état alimente \texttt{LayerNorm + Linear} (logits
   multi-classe) ;
-  \item la perte est la cross-entropie pondérée par classe ; on restaure le meilleur checkpoint (macro-F1 val).
+  \item la perte est la cross-entropie (\texttt{F.cross\_entropy}).
 \end{itemize}
 
 L'entraînement standard gèle le backbone et la tête HAR
@@ -2482,48 +2426,73 @@ contre une baseline majorité d'environ 0,04. La tâche reste non triviale
 (transitions rares, déséquilibre, split par sujet), mais nettement au-dessus
 du niveau hasard/majorité.
 
-\section{Modules complémentaires alignés sur la fiche PFE}
+\section{Modules complémentaires}
 
-La fiche PFE (code~26/2755) mentionne l'auto-supervision, les modèles de type
-fondation, la calibration en ligne, l'apprentissage séquentiel / renforcement,
-l'anticipation d'une perte d'équilibre et des activités domestiques (repas).
-Les modules suivants couvrent ces orientations, avec des limites assumées.
+La fiche mentionnait aussi l'auto-supervision, un prétrain de type fondation,
+la calibration en ligne, un peu de renforcement, l'anticipation d'un déséquilibre
+et des activités domestiques comme la préparation d'un repas. Voici ce que
+nous avons réellement ajouté, avec les limites qui vont avec.
 
 \subsection{Pré-entraînement auto-supervisé (SSL)}
 
-Un pré-entraînement SimCLR-style sur fenêtres IMU (sans labels) produit deux
-vues augmentées (bruit, scale, masquage) et minimise une perte NT-Xent. Le
-backbone (\texttt{ssl\_backbone.pt}) sert d'initialisation optionnelle — SSL
-pragmatique, pas massif \parencite{yuan2024}.
+Avant le fine-tuning supervisé, un pré-entraînement SimCLR-style sur fenêtres
+IMU (sans labels) produit deux vues augmentées (bruit gaussien, mise à
+l'échelle canal, masquage temporel) et minimise une perte NT-Xent sur une
+tête de projection. Le backbone obtenu (\texttt{ssl\_backbone.pt}) sert
+d'initialisation optionnelle. Ce n'est pas un SSL massif type industrie
+\parencite{yuan2024}, mais une étape pragmatique compatible avec nos volumes
+de données.
 
 \subsection{Pipeline foundation-style}
 
-Motif prétrain générique $\rightarrow$ adaptation ciblée
-(\texttt{train\_foundation\_style.py} $\rightarrow$ \texttt{foundation\_style.pt}),
-sans intégrer un FM public. Le checkpoint de production reste
-\texttt{pretrained.pt}.
+Par \emph{foundation-style}, nous entendons le motif
+prétrain générique $\rightarrow$ adaptation ciblée, et non l'intégration d'un
+modèle de fondation public (TimesNet, UniTS, MOMENT). Le script
+\texttt{train\_foundation\_style.py} enchaîne SSL puis fine-tune supervisé
+sur HAPT/WISDM et produit \texttt{foundation\_style.pt}. Ce checkpoint
+démontre le pattern ; le checkpoint de production reste
+\texttt{pretrained.pt} (supervisé direct).
 
 \subsection{Calibration de confiance en ligne}
 
-\texttt{OnlineCalibrator} combine température $T$ apprise en ligne (NLL) et
-seuil d'acceptation adaptatif — distinct de la seule mise à jour des prototypes.
+Outre la mise à jour des prototypes, un module
+\texttt{OnlineCalibrator} combine :
+\begin{itemize}
+  \item \texttt{OnlineTemperatureScaler} : un scalaire $T$ appris en ligne
+  (NLL sur un tampon étiqueté) pour recalibrer $\mathrm{softmax}(\ell/T)$ ;
+  \item \texttt{AdaptiveConfidenceThreshold} : seuil d'acceptation / rejet
+  ajusté dynamiquement selon la fiabilité observée.
+\end{itemize}
+Ce mécanisme répond à l'exigence fiche de \emph{calibration adaptative en ligne}
+des scores d'alerte et de classification.
 
 \subsection{Bandit de seuil (RL léger)}
 
-Bandit $\varepsilon$-greedy (\texttt{ThresholdBandit}) sur une grille de seuils
-d'alerte : récompense les vraies alertes, pénalise les fausses. Ce n'est pas
-du deep RL.
+La fiche évoque l'apprentissage séquentiel par renforcement. Nous
+implémentons un bandit $\varepsilon$-greedy (\texttt{ThresholdBandit}) sur une
+grille de seuils de confiance d'alerte. La récompense pénalise les fausses
+alertes et récompense les vraies détections. Ce n'est pas du deep RL ; c'est
+une adaptation en ligne du seuil d'alerte, suffisante pour la démonstration
+et le couplage avec la calibration.
 
 \subsection{Anticipation du risque de chute / équilibre}
 
-\texttt{FallRiskHead} prédit si la prochaine activité est une transition
-posturale à risque (labels 9--12). \texttt{PhysicalFallDetector} complète la
-couche sécurité. Pas de classe \texttt{fall} clinique dans le merge actuel.
+Au-delà de la détection d'impact a posteriori, une tête binaire
+\texttt{FallRiskHead} (LSTM sur séquence d'embeddings) prédit si la
+\emph{prochaine} activité est une transition posturale à risque
+(labels 9--12 : stand$\leftrightarrow$sit, sit$\leftrightarrow$lie). Un
+détecteur physique heuristique (\texttt{PhysicalFallDetector}) complète la
+couche sécurité. La classe unifiée \texttt{fall} étant absente du merge
+HAPT+WISDM, nous ne prétendons pas détecter des chutes cliniques réelles ;
+MobiAct reste une perspective.
 
 \subsection{Scénario « préparation de repas »}
 
-Documenté dans \texttt{adl\_scenarios.py} comme \emph{unavailable} (pas de
-labels cuisine) ; proxy UI uniquement pour la démo Streamlit.
+La fiche cite la préparation d'un repas comme exemple d'activité. Aucun
+label cuisine n'existe dans HAPT/WISDM. Le module
+\texttt{adl\_scenarios.py} documente le scénario comme \emph{unavailable}
+et expose un proxy narratif UI (transitions domestiques) uniquement pour
+la démo Streamlit — à ne pas présenter comme un classifieur de repas.
 
 \section{Scénarios d'utilisation et flux de données}
 
@@ -2553,12 +2522,12 @@ par classe ; la taille (2\,000 vs 5\,000) conditionne directement le forgetting
 (22~\% de réduction observée). Les transitions posturales HAPT modélisent ce
 déséquilibre extrême entre classes massives et classes rares.
 
-\subsection{Cas 3 — Déploiement cross-appareil (CORAL + anticipation)}
+\subsection{Cas 3 — Déploiement cross-appareil (DomainAdapter + anticipation)}
 
 Un patient quitte l'hôpital (capteur ceinture, protocole HAPT-like) et continue
-le suivi à domicile avec son téléphone en poche (distribution WISDM-like). CORAL
-supervisé sur 20~\% de sessions étiquetées à domicile aligne les embeddings avant
-fine-tuning léger. En parallèle, le module d'anticipation LSTM peut signaler
+le suivi à domicile avec son téléphone en poche (distribution WISDM-like). Un
+\texttt{DomainAdapter} few-shot sur quelques fenêtres étiquetées à domicile
+calibre les embeddings avant inférence. En parallèle, le module d'anticipation LSTM peut signaler
 une activité suivante probable lorsque le contexte partiel suggère une
 transition ; le détecteur hybride de chutes fusionne règles physiques et MLP.
 Ce scénario combine adaptation domaine, CL utilisateur si le patient est suivi
@@ -2603,7 +2572,7 @@ Toutes les méthodes utilisent le même backbone pré-entraîné pour garantir u
 \textbf{Méthode d'anticipation (livrée)} & \textbf{Macro-F1 (ordre de grandeur)} \\
 \hline
 LSTM multi-classe, fenêtres partielles,
-\texttt{transitions\_only} + fin de fenêtre (notre méthode) & $\approx$ 0,59--0,64 \\
+\texttt{transitions\_only} (notre méthode) & $\approx$ 0,59--0,64 \\
 \hline
 \end{tabularx}
 \caption{Baseline anticipation — formulation implémentée dans \texttt{har\_project}}
@@ -2644,53 +2613,31 @@ Backward Transfer (BWT) : version signée du forgetting, permettant de détecter
 
 AUC-ROC : aire sous la courbe ROC, utilisée pour la détection de chutes et l'anticipation, insensible au seuil de décision.
 
-\section{Module auxiliaire — détection de chutes}
+\section{Module auxiliaire — risque de chute et alerte}
 
-\subsection{Motivation}
-
-La détection de chutes est un cas d'usage HAR à fort enjeu (aide à domicile).
-Notre architecture modulaire permet d'ajouter un détecteur sans modifier le
-backbone CL. En l'absence de MobiAct au moment des runs, nous utilisons les
-transitions posturales brusques HAPT comme proxy positif et jogging comme négatif
-difficile.
-
-\subsection{Approche hybride}
-
-Deux canaux parallèles fusionnés par OR logique :
-\begin{itemize}
-  \item \textbf{Règles physiques} : magnitude acc $> 2{,}5g$ ET gyro $> 200$~deg/s
-  sur la fenêtre 3~s — détecte les impacts brusques avec faible coût CPU.
-  \item \textbf{MLP sur embedding} : 128 $\rightarrow$ 64 $\rightarrow$ 32 $\rightarrow$ 1,
-  entraîné sur embeddings backbone gelé — capture des patterns subtils (différence
-  chute vs saut volontaire).
-\end{itemize}
+Pour l'alerte préventive, on combine trois éléments. Une tête LSTM binaire
+(\texttt{FallRiskHead}) indique si la prochaine activité est une transition
+posturale à risque (labels 9--12). Une heuristique physique
+(\texttt{PhysicalFallDetector}) repère un pic d'accélération suivi d'une
+phase calme. Enfin, un bandit de seuil et une calibration de température
+ajustent l'alerte en ligne.
 
 \subsection{Métriques cibles}
 
-AUC-ROC et F1 ; objectif clinique AUC $> 0{,}90$ sur MobiAct
-\parencite{vavoulas2016}. Résultat actuel : AUC 0,762 (proxy) — preuve de concept
-seulement.
+Macro-F1 binaire et accuracy pour le fall-risk ; objectif clinique sur chutes
+réelles (MobiAct) reporté. Résultat actuel : macro-F1 binaire $\approx$ 0,88
+sur transitions HAPT ($p\in\{50\%,75\%\}$) — preuve de concept, pas validation
+clinique. L'AUC-ROC 0,762 du détecteur hybride historique (proxy impact)
+reste documenté comme baseline complémentaire.
 
 \section{Conclusion}
 
-Ce chapitre a présenté la conception du système HAR adaptatif et continu.
-L'architecture à backbone Transformer partagé mutualise les représentations
-entre la reconnaissance continue (UWR + prototypes) et l'anticipation
-multi-classe (LSTM sur fenêtres partielles). UWR exploite l'incertitude
-(entropie softmax) pour guider le tampon de rejeu. L'anticipation
-atteint un macro-F1 de validation d'environ 0,60--0,64 selon le ratio d'observation (baseline majorité $\approx$ 0,04).
+En résumé, le système repose sur un Transformer partagé, UWR pour l'apprentissage
+continu, et une anticipation LSTM sur fenêtres partielles. Autour, SSL léger,
+adaptateur de domaine, calibration, bandit de seuil et fall-risk complètent
+le dispositif sans le surcharger. Le chapitre suivant décrit comment tout
+cela est codé et entraîné.
 
-Le chapitre suivant présente l'implémentation concrète de ces composants, les
-choix d'ingénierie effectués et les détails de configuration des expériences.
-
-\subsection{Synthèse des choix de conception}
-
-Retenir : (1)~backbone partagé ; (2)~UWR (tampon 2\,000) ; (3)~anticipation
-LSTM multi-classe sur fenêtres partielles (filtre transitions) ; (4)~CORAL
-avec labels cibles partiels ; (5)~protocoles CL user (sujets triés) et class
-($2$ classes/tâche). L'évaluation chapitre~6 valide ces choix.
-
-\clearpage
 % ===== END include: 09-Conception.tex =====
 
 
@@ -2757,9 +2704,14 @@ har_project/
 |   |   |-- fall_risk.py           # fall-risk + heuristique physique
 |   |   |-- online_calibration.py  # temperature + seuil
 |   |   `-- domain_adapter.py      # DomainAdapter (affine few-shot)
-|   `-- training/
-|       |-- trainer.py             # boucle pre-entrainement
-|       `-- anticipation_trainer.py
+|   |-- training/
+|   |   |-- trainer.py             # boucle pre-entrainement
+|   |   |-- anticipation_trainer.py
+|   |   |-- ssl_pretrain.py        # SimCLR-style IMU
+|   |   |-- fall_risk_trainer.py
+|   |   `-- rl_threshold_agent.py  # bandit de seuil
+|   `-- scenarios/
+|       `-- adl_scenarios.py       # repas (indisponible) + proxy UI
 |-- scripts/                       # scripts executables
 |-- checkpoints/                   # modeles sauvegardes
 |-- data/
@@ -2991,7 +2943,7 @@ def compute_uncertainty_scores(self, model, device, batch_size=256):
     return scores / scores.sum()
 \end{lstlisting}
 
-Il n'existe pas de fichier \texttt{uncertainty\_replay.py} dans le dépôt livré : le MC Dropout reste une référence bibliographique, pas l'implémentation utilisée pour pondérer le rejeu.
+Il n'existe pas de fichier \texttt{mc\_dropout.py} dans le dépôt livré : le MC Dropout reste une référence bibliographique, pas l'implémentation utilisée pour pondérer le rejeu.
 
 \subsection{Entraînement incrémental complet}
 
@@ -3093,14 +3045,14 @@ puis appelle le LSTM.
 
 \subsection{Dataset et entraînement}
 
-\texttt{AnticipationDataset} : contexte $S=5$ fenêtres tronquées en
-\emph{fin} de fenêtre (\texttt{truncate\_from=end}), cible = label de la
-fenêtre suivante, filtre \texttt{transitions\_only}. Le split train/val
-est \textbf{par sujet} (\texttt{build\_anticipation\_datasets}).
+\texttt{AnticipationDataset} : contexte $S=5$ fenêtres tronquées à $p\,\%$,
+cible = label de la fenêtre suivante, filtre \texttt{transitions\_only}.
+Le split train/val (80/20) est obtenu après mélange des fenêtres
+(\texttt{build\_anticipation\_datasets}).
 
 Dans \texttt{anticipation\_trainer.py} : backbone + HAR gelés ; AdamW sur la
-tête LSTM ; \texttt{cross\_entropy} pondérée par classe ; restauration du
-meilleur macro-F1 de validation ; un entraînement par ratio $p$.
+tête LSTM ; perte \texttt{cross\_entropy} ; métriques accuracy et macro-F1 ;
+un entraînement par ratio $p$.
 
 \begin{table}[H]
 \centering
@@ -3120,7 +3072,7 @@ Baseline majorité & $\approx$ 0,04 & Toujours la classe la plus fréquente \\
 \end{table}
 \section{Contributions supplémentaires}
 
-\subsection{Détection de chute — approche hybride}
+\subsection{Détection de chute — approche hybride / fall-risk}
 
 La composante alerte / équilibre est réalisée par \texttt{FallRiskHead}
 (\texttt{src/models/fall\_risk.py}, script \texttt{train\_fall\_risk.py}) :
@@ -3139,15 +3091,22 @@ d'alerte (RL léger), couplée à une calibration de température
 \subsection{SSL, foundation-style, calibration et RL léger}
 
 Pour coller aux orientations de la fiche PFE, des modules légers ont été
-ajoutés : pré-entraînement auto-supervisé SimCLR-style
-(\texttt{scripts/train\_ssl.py} $\rightarrow$ \texttt{ssl\_backbone.pt}) ;
-pipeline foundation-style SSL puis fine-tune
-(\texttt{train\_foundation\_style.py} $\rightarrow$ \texttt{foundation\_style.pt},
-run court démonstratif, distinct du \texttt{pretrained.pt} de production) ;
-calibration online et bandit de seuil
-(\texttt{online\_calibration.py}, \texttt{rl\_threshold\_agent.py}).
-Le scénario « préparation de repas » reste hors portée faute de corpus cuisine.
-L'interface Streamlit expose six scénarios (reconnaissance, nouvel utilisateur,
+ajoutés :
+\begin{itemize}
+  \item pré-entraînement auto-supervisé SimCLR-style
+  (\texttt{scripts/train\_ssl.py} $\rightarrow$ \texttt{ssl\_backbone.pt}) :
+  augmentations bruit / scale / mask + perte NT-Xent ;
+  \item pipeline foundation-style SSL puis fine-tune
+  (\texttt{train\_foundation\_style.py} $\rightarrow$ \texttt{foundation\_style.pt},
+  run démonstratif, distinct du \texttt{pretrained.pt} de production) ;
+  \item calibration online
+  (\texttt{online\_calibration.py} : température + seuil adaptatif) ;
+  \item bandit $\varepsilon$-greedy de seuil d'alerte
+  (\texttt{rl\_threshold\_agent.py}).
+\end{itemize}
+Le scénario « préparation de repas » reste hors portée faute de corpus cuisine
+(\texttt{adl\_scenarios.py}, statut \texttt{available=False}). L'interface
+Streamlit expose six scénarios (reconnaissance, nouvel utilisateur,
 anticipation, fall-risk, calibration+RL, SSL/foundation).
 
 \subsection{Adaptateur de domaine (\texttt{DomainAdapter})}
@@ -3163,7 +3122,7 @@ cibles étiquetées).
 CORAL \parencite{sun2016} (alignement de covariance) reste une référence
 bibliographique pertinente, mais \emph{n'est pas} la fonction de perte
 exécutée dans le dépôt actuel : il n'existe pas de \texttt{coral\_loss} ni de
-classe \texttt{DomainAdapter} dans le code.
+classe \texttt{CORALAdapter} dans le code.
 
 \begin{table}[H]
 \centering
@@ -3183,29 +3142,28 @@ HAPT $\rightarrow$ PAMAP2 (zéro-shot) & 0,124 \\
 
 Ces chiffres confirment un fort domain shift (surtout PAMAP2). L'adaptateur
 affine few-shot vise à récupérer une partie de ce gap sans réentraînement
-complet ; les anciens tableaux « CORAL 0,46 / domain shift » ne correspondent
+complet ; les anciens tableaux « CORAL 0,629 / $\times 15$ » ne correspondent
 pas au code livré et ne sont plus rapportés comme résultat reproductible.
 
 \section{Conclusion}
 
-Ce chapitre a présenté les choix d'implémentation pour concrétiser l'architecture
-du Chapitre~4. Chaque composant — backbone Transformer, tampon UWR, module
-d'anticipation LSTM, détecteur de chutes hybride, adaptateur de domaine (\texttt{DomainAdapter}) — est un
-module Python indépendant intégré dans \texttt{HARContinualModel}. Les expériences
-valident l'augmentation de données, l'UWR et CORAL ; l'anticipation multi-classe
-reste difficile. Le chapitre suivant présente l'évaluation systématique.
+Le chapitre~4 est maintenant incarné dans des modules Python séparés : backbone,
+UWR, anticipation, fall-risk, SSL, calibration, bandit et
+\texttt{DomainAdapter}. Les runs confirment surtout UWR et le diagnostic
+cross-dataset ; l'anticipation multi-classe se situe autour de 0,60--0,64 de
+macro-F1. Le chapitre suivant regarde les chiffres de plus près.
 
-\subsection{Retour d'expérience implémentation}
+\subsection{Retour d'expérience}
 
-Trois décisions d'ingénierie ont accéléré le développement : (1)~interface commune
-\texttt{ReplayBuffer} / \texttt{UncertaintyWeightedReplayBuffer} pour baselines
-AB ; (2)~gel du backbone pendant les premières expériences d'anticipation pour
-isoler la tête ; (3)~script unique \texttt{regenerate\_figures.sh} pour éviter
-les figures manuelles obsolètes. Le backend MPS (Apple Silicon) a divisé par
-deux le temps de pré-train vs CPU ; les runs 44 tâches restent overnight ($\sim$8h)
-— argument pour checkpoints intermédiaires documentés en annexe~H.
+Quelques choix ont simplifié le travail. Une interface commune
+\texttt{ReplayBuffer} / \texttt{UncertaintyWeightedReplayBuffer} a permis de
+comparer les baselines sans tout réécrire. Geler le backbone au début des
+expériences d'anticipation a isolé la tête LSTM. Un script de régénération
+des figures évite les captures obsolètes. Sur Apple Silicon (MPS), le
+pré-entraînement est nettement plus rapide qu'en CPU ; les runs à 44 tâches
+restent longs (de l'ordre d'une nuit), d'où l'intérêt des checkpoints
+intermédiaires.
 
-\clearpage
 % ===== END include: 10-Realisation.tex =====
 
 
@@ -3576,7 +3534,7 @@ Entropie softmax UWR (\texttt{uncertainty\_replay.py}) & Pondération $\propto \
 Fall-risk binaire (transitions 9--12)            & Macro-F1 $\approx$ 0,88 \\
 Détection impact (hybride historique)            & AUC-ROC = 0,762 \\
 \texttt{DomainAdapter} (affine few-shot)              & HAPT$\rightarrow$WISDM F1 $\approx$0,46 \\
-SSL / foundation-style                           & \texttt{ssl\_backbone.pt}, \texttt{foundation\_style.pt} \\
+SSL SimCLR-style / foundation-style              & Checkpoints \texttt{ssl\_backbone.pt}, \texttt{foundation\_style.pt} \\
 Calibration + bandit de seuil                    & Modules online (démo Streamlit) \\
 \hline
 \end{tabularx}
@@ -3586,11 +3544,14 @@ Calibration + bandit de seuil                    & Modules online (démo Streaml
 
 \subsection{Fall-risk, SSL et calibration}
 
-Sur le protocole fall-risk (\texttt{train\_fall\_risk.py}), le macro-F1 de
-validation atteint 0,88 pour $p\in\{50\%,75\%\}$ (accuracy $\approx$0,925).
-Le SSL et le pipeline foundation-style fournissent des initialisations
-optionnelles ; la calibration et le bandit de seuil sont validés
-fonctionnellement dans Streamlit.
+Sur le protocole anticipation binaire fall-risk
+(\texttt{train\_fall\_risk.py}), le macro-F1 de validation atteint 0,88 pour
+$p\in\{50\%,75\%\}$ (accuracy $\approx$0,925). Le SSL et le pipeline
+foundation-style produisent des checkpoints utilisables comme initialisations
+optionnelles ; ils ne remplacent pas le pré-entraînement supervisé de
+production dans les tableaux CL principaux. La calibration de température et
+le bandit de seuil sont validés fonctionnellement dans l'interface Streamlit
+(adaptation en ligne du seuil d'alerte).
 
 \section{Guide de reproductibilité}
 
@@ -3631,7 +3592,7 @@ Classification HAR        & 81,0~\% & 91,3~\% & +10,3 pts \\
 CL user-incrémental (10 suj.) & 62,4~\% & 79,2~\% & +16,8 pts \\
 CL class-incrémental        & 58,1~\% & 74,6~\% & +16,5 pts \\
 Anticipation LSTM multi-classe & — & $\approx$0,60--0,64 & fin fenêtre + poids \\
-Cross-dataset CORAL         & 0,040   & 0,46   & domain shift \\
+Cross-dataset WISDM         & 0,838 (intra) & $\approx$0,46 & domain shift \\
 Fall-risk (macro-F1 binaire) & — & $\approx$0,88 & transitions 9--12 \\
 \hline
 \end{tabularx}
@@ -3641,43 +3602,29 @@ Fall-risk (macro-F1 binaire) & — & $\approx$0,88 & transitions 9--12 \\
 
 \subsection{Limites}
 
-\begin{itemize}
-  \item \textbf{Class-incrémental} : F1 final modeste (0,16--0,17) — déséquilibre
-  extrême entre classes rares et dominantes.
-  \item \textbf{Cross-domain} : oubli marqué à l'arrivée de PAMAP2 (tâches 37--44).
-  \item \textbf{Anticipation} : macro-F1 multi-classe d'environ 0,60--0,64 selon $p$.
-  \item \textbf{Chutes} : proxy HAPT (fall-risk transitions), pas de chutes réelles
-  (MobiAct) ; repas non entraînable sans corpus cuisine.
-  \item \textbf{SSL / foundation / RL} : modules légers démonstratifs, pas un FM
-  public ni du deep RL.
-\end{itemize}
+Le class-incrémental reste le point faible : le F1 final est bas quand les
+classes rares et dominantes se mélangent mal. L'arrivée de PAMAP2 (tâches
+37--44) fait encore beaucoup oublier. L'anticipation multi-classe plafonne
+autour de 0,60--0,64 selon $p$. Le fall-risk repose sur des transitions
+HAPT, pas sur des chutes cliniques. SSL, foundation-style et bandit sont des
+versions légères. Sans corpus cuisine, le scénario repas n'est pas entraînable.
 
 \subsection{Perspectives d'amélioration}
 
-Trois axes ressortent des expériences pour un déploiement réel.
-
-\textbf{Tampon domain-aware.} L'oubli PAMAP2 (tâches 37--44) suggère d'étiqueter
-les exemples du rejeu par domaine capteur et de garantir un quota minimum lors
-de l'échantillonnage UWR. CORAL intermédiaire avant chaque nouveau domaine
-pourrait stabiliser les embeddings.
-
-\textbf{Anticipation.} Améliorer le contexte temporel et le déséquilibre
-(oversampling des transitions, entraînement conjoint plus poussé) pour relever
-le macro-F1 au-delà de $\approx$0,64.
-
-\textbf{Validation chutes.} Intégrer MobiAct et comparer règles seules, ML seul
-et hybride sur chutes réelles clôturerait la boucle aide à domicile évoquée au
-chapitre~1.
+Pour un usage réel, trois pistes semblent prioritaires. D'abord, étiqueter
+les exemples du rejeu par domaine capteur pour mieux tenir face à PAMAP2.
+Ensuite, pousser l'anticipation (oversampling des transitions, entraînement
+conjoint plus long). Enfin, valider sur MobiAct pour les chutes et, si
+possible, sur un jeu cuisine pour le scénario repas de la fiche.
 
 \section{Conclusion}
 
-Les expériences confirment la chaîne conception (ch.~4) $\rightarrow$ implémentation
-(ch.~5) : backbone compétitif, UWR efficace, anticipation LSTM opérationnelle
-mais encore limitée, CORAL synergique avec le pré-entraînement. Les axes
-d'amélioration (tampon plus grand, MobiAct, anticipation) sont identifiés
-pour la suite.
+Les expériences confirment l'essentiel : le backbone tient la route, UWR
+réduit clairement l'oubli, l'anticipation LSTM dépasse une baseline naïve
+sans être encore assez sûre pour une alerte médicale, et le cross-dataset
+montre un vrai domain shift. La suite logique est un tampon plus conscient
+du domaine, MobiAct, et un travail plus poussé sur l'anticipation.
 
-\clearpage
 % ===== END include: 11-Evaluation.tex =====
 
 
@@ -3691,42 +3638,38 @@ pour la suite.
 
 \section{Rappel du contexte}
 
-La HAR par IMU est utile, mais un modèle figé après un entraînement initial ne
-tient pas longtemps en conditions réelles : nouveaux porteurs, capteurs différents,
-activités non vues à l'entraînement. Réapprendre sans mécanisme anti-oubli dégrade
-l'existant ; rester purement réactif empêche d'alerter avant une transition. Ce
-mémoire a visé les deux axes : adaptation continue et anticipation légère, en
-alignement avec la fiche PFE~26/2755.
+Un modèle HAR figé après l'entraînement initial tient mal en conditions
+réelles : nouveaux porteurs, autres capteurs, activités non vues. Réapprendre
+sans garde-fou contre l'oubli abîme ce qui marchait ; rester purement réactif
+empêche d'alerter avant une transition. Ce mémoire s'est concentré sur ces
+deux points : adaptation continue et anticipation légère.
 
 \section{Ce que nous avons apporté}
 
-\textbf{Backbone Transformer.} L'encodeur \emph{IMUTransformerEncoder} (531\,K
-paramètres, 4 blocs, token CLS) atteint 91,3~\% d'accuracy sur HAPT avec
-augmentation — niveau compétitif sans pré-entraînement massif.
+L'encodeur \emph{IMUTransformerEncoder} (environ 531\,K paramètres, 4 blocs)
+atteint 91,3~\% d'accuracy sur HAPT avec augmentation, sans pré-entraînement
+massif.
 
-\textbf{UWR.} Le tampon de rejeu priorise les exemples incertains (entropie softmax, $\alpha$).
-Avec 2\,000 exemples mémorisés, l'oubli passe de 0,24 (finetuning naïf) à 0,09
-dans le protocole 10 sujets ; UWR bat EWC et iCaRL sur les scénarios testés.
+Le tampon UWR priorise les fenêtres à forte entropie de prédiction. Avec
+2\,000 exemples mémorisés, l'oubli passe d'environ 0,24 (finetuning naïf) à
+0,09 sur le protocole à 10 sujets ; UWR dépasse EWC et iCaRL dans nos tests.
 
-\textbf{Anticipation LSTM multi-classe.} Une tête \texttt{AnticipationHead}
-(LSTM + Linear) prédit l'activité suivante depuis $S=5$ fenêtres partielles
-($p\in\{25,50,75\}\%$), avec filtrage \texttt{transitions\_only} et backbone
-gelé. Le macro-F1 de validation atteint environ 0,60--0,64 : la tâche reste non
-triviale mais opérationnelle en démo.
+La tête d'anticipation LSTM prédit l'activité suivante à partir de $S=5$
+fenêtres partielles. Le macro-F1 de validation se situe autour de 0,60--0,64 :
+ce n'est pas encore un système d'alerte clinique, mais ce n'est plus du
+hasard non plus (baseline majorité $\approx$0,04).
 
-\textbf{Adaptation de domaine.} \texttt{DomainAdapter} (affine few-shot sur
-embeddings, backbone gelé). Transfert mesuré : HAPT$\rightarrow$WISDM
-macro-F1 $\approx$0,46 ; HAPT$\rightarrow$PAMAP2 $\approx$0,12
-(\texttt{cross\_dataset\_results.npy}). CORAL reste une référence, pas le code.
+Pour le cross-dataset, le code livre un \texttt{DomainAdapter} affine
+few-shot. Les chiffres mesurés en zéro-shot sont d'environ 0,46 sur WISDM et
+0,12 sur PAMAP2. CORAL apparaît dans la bibliographie, pas comme perte
+exécutée dans le dépôt.
 
-\textbf{Modules fiche PFE.} SSL SimCLR-style et pipeline foundation-style
-(checkpoints dédiés) ; calibration de température + seuil adaptatif en ligne ;
-bandit $\varepsilon$-greedy de seuil d'alerte (RL léger) ; fall-risk binaire
-(macro-F1 $\approx$0,88 sur transitions 9--12) ; scénario repas documenté comme
-indisponible faute de corpus.
-
-Un module hybride d'impact (seuils physiques + MLP) atteint AUC-ROC 0,762 sur
-proxy HAPT ; les chutes réelles restent à valider (MobiAct).
+Nous avons aussi ajouté un SSL SimCLR-style, un pipeline foundation-style
+léger, une calibration de température, un bandit de seuil et un fall-risk
+binaire (macro-F1 $\approx$0,88 sur les transitions 9--12). Le scénario
+« repas » reste hors portée faute de labels cuisine. Un détecteur d'impact
+hybride historique donne une AUC-ROC de 0,762 sur un proxy HAPT ; les chutes
+réelles demanderaient MobiAct.
 
 \section{Bilan chiffré}
 
@@ -3740,7 +3683,7 @@ proxy HAPT ; les chutes réelles restent à valider (MobiAct).
 Classification HAR       & 81,0~\% & 91,3~\% & +10,3 pts \\
 CL user-incrémental        & 62,4~\% & 79,2~\% & +16,8 pts \\
 CL class-incrémental       & 62,4~\% & 79,8~\% & +17,4 pts \\
-Anticipation (macro-F1)    & —       & $\approx$0,60--0,64 & fin fenêtre + poids \\
+Anticipation (macro-F1)    & —       & $\approx$0,60--0,64 & vs majorité $\approx$0,04 \\
 Cross-dataset WISDM (F1)   & 0,838 (intra) & $\approx$0,46 & domain shift \\
 Fall-risk (macro-F1)       & —       & $\approx$0,88 & transitions 9--12 \\
 Détection impact (AUC)     & —       & 0,762   & — \\
@@ -3750,81 +3693,47 @@ Détection impact (AUC)     & —       & 0,762   & — \\
 \label{tab:bilan_conclusion}
 \end{table}
 
-Les leviers — bonnes représentations, mémoire intelligente, modules auxiliaires —
-se renforcent mutuellement plutôt que de se substituer.
-
 \section{Limites}
 
-Nous restons à ~12 points sous le \emph{joint training} (91,3~\% vs 79,2~\% en CL)
-: prix de la mémoire bornée et de l'accès séquentiel aux données. L'anticipation
-multi-classe (macro-F1 $\approx$0,60--0,64) est utilisable en démo ; un déploiement
-clinique reste un déploiement d'alerte. Les chutes sont testées sur transitions
-posturales, pas sur chutes réelles. SSL / foundation / RL sont des versions
-légères ; le repas reste hors portée sans corpus cuisine.
+Nous restons à environ 12 points sous l'entraînement joint en CL user. La
+mémoire est bornée et les données n'arrivent qu'en séquence. L'anticipation
+multi-classe reste fragile pour une alerte médicale. Les « chutes » du
+fall-risk sont des transitions posturales, pas des chutes cliniques. SSL,
+foundation-style et RL sont volontairement légers. Sans corpus cuisine, le
+scénario repas de la fiche ne peut pas être entraîné.
 
 \section{Perspectives}
 
-\textbf{Court terme.} Intégrer MobiAct pour les chutes ; enrichir l'augmentation
-(mixup inter-sujets) ; améliorer l'anticipation (oversampling des transitions,
-contexte temporel) ; corpus ADL cuisine pour le scénario repas.
+À court terme, intégrer MobiAct, mieux gérer le déséquilibre des transitions
+et, si possible, un jeu ADL cuisine. À moyen terme, exporter vers ONNX/TFLite,
+tester OPPORTUNITY et pousser le SSL avec plus de données. Plus loin, un
+agent qui composerait le tampon, un vrai backbone foundation
+\parencite{yuan2024} branché sur UWR, ou une fusion IMU avec d'autres
+modalités.
 
-\textbf{Moyen terme.} Porter le modèle sur Android/iOS (ONNX / TFLite) ;
-distiller l'incertitude MC en une passe ; évaluer OPPORTUNITY et PAMAP2 ;
-few-shot par utilisateur sur les prototypes ; durcir le SSL (plus de données).
+Le dépôt est rangé pour qu'on puisse reprendre le travail ou viser un
+workshop. Les figures se régénèrent et les checkpoints évitent de tout
+réentraîner. Une note courte centrée sur UWR, avec un protocole OCL-HAR
+strict, serait un bon prochain pas.
 
-\textbf{Long terme.} Agent RL pour composer le tampon (au-delà du bandit de
-seuil) ; backbone foundation public \parencite{yuan2024} avec UWR ; fusion
-IMU + PPG/EMG en CL multi-modal.
+\section{Retour sur les objectifs}
 
-\subsection{Publication et ouverture}
+Le backbone tient ses promesses sur HAPT. Le CL est solide en user-incrémental
+mais encore fragile en class-incrémental (F1 final faible à cause du
+déséquilibre). L'anticipation et le fall-risk fonctionnent en démo. Le
+cross-dataset montre clairement le domain shift ; l'adaptateur few-shot est
+là pour l'atténuer. Les modules SSL / calibration / bandit répondent aux
+orientations de la fiche sans prétendre à l'état de l'art industriel.
 
-Le projet \texttt{har\_project/} est structuré pour une reprise ou une
-soumission workshop (ISWC, PerCom). Les figures sont régénérables ; les
-checkpoints permettent de reproduire les courbes sans réentraînement complet.
-Une publication ciblée pourrait isoler UWR avec un protocole OCL-HAR
-strictement reproduit.
+\section{Ce qu'on retiendrait pour un déploiement}
 
-En définitive, une HAR adaptative et embarquable est atteignable avec des
-contraintes réalistes. UWR et l'adaptation de domaine apportent des gains mesurables ;
-l'anticipation LSTM et le fall-risk montrent la faisabilité de modules
-proactifs, avec des performances encore à améliorer.
-
-\section{Retour sur les objectifs du mémoire}
-
-Au départ, cinq objectifs avaient été fixés (chapitre~4). Bilan :
-
-\begin{itemize}
-  \item \textbf{Backbone universel} : atteint (91,3~\% HAPT, F1 macro 0,752).
-  \item \textbf{CL robuste} : atteint partiellement — UWR bat baselines sur 10 et
-  44 sujets, mais F1 class-incrémental final modeste (0,16) par déséquilibre.
-  \item \textbf{Anticipation} : atteint partiellement — macro-F1 $\approx$0,60--0,64 ;
-  fall-risk binaire $\approx$0,88.
-  \item \textbf{Cross-dataset} : mesuré (WISDM $\approx$0,46 ; PAMAP2
-  $\approx$0,12) ; adaptateur \texttt{DomainAdapter} few-shot disponible.
-  \item \textbf{Détection chutes / alerte} : démonstration de faisabilité
-  (fall-risk + AUC impact 0,762) ; validation clinique reportée (MobiAct).
-  \item \textbf{SSL / foundation / calibration / RL} : modules livrés (légers),
-  couvrant les orientations de la fiche.
-\end{itemize}
-
-\section{Apports méthodologiques}
-
-Deux idées sont combinées dans le système : (1)~rejeu pondéré par incertitude
-par entropie softmax sur IMU (UWR) ; (2)~CORAL appliqué aux embeddings d'un
-Transformer pré-entraîné avec supervision partielle cible. L'anticipation LSTM
-multi-classe, le fall-risk, le SSL foundation-style et la calibration+bandit
-complètent le système. Leur intégration dans \texttt{har\_project} constitue
-la contribution ingénierie du mémoire.
-
-\section{Message pour le déploiement}
-
-Un ingénieur souhaitant déployer une HAR adaptive peut retenir : pré-train
-supervisé modeste suffit si l'augmentation est soignée ; un tampon de 2\,000
-fenêtres avec UWR vaut mieux qu'un finetuning naïf pour des dizaines d'utilisateurs ;
-l'anticipation multi-classe seule ne suffit pas encore pour des alertes fiables
-(préférer fall-risk binaire + seuil calibré) ; le cross-domain exige quelques
-labels cibles — le zéro-shot ne suffit pas. Ces enseignements sont documentés
-avec scripts reproductibles en annexe.
+Un pré-entraînement supervisé soigné suffit souvent. Un tampon de 2\,000
+fenêtres avec UWR vaut mieux qu'un finetuning naïf quand les utilisateurs
+arrivent les uns après les autres. Pour alerter, le fall-risk binaire avec
+seuil calibré est plus crédible que l'anticipation multi-classe seule. En
+cross-domain, quelques labels cibles aident beaucoup : le zéro-shot ne
+suffit pas. Les scripts et annexes détaillent comment reproduire ces
+constats.
 
 % ===== END include: 12-Conclusion.tex =====
 

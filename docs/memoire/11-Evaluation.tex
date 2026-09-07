@@ -431,38 +431,25 @@ Fall-risk (macro-F1 binaire) & — & $\approx$0,88 & transitions 9--12 \\
 
 \subsection{Limites}
 
-\begin{itemize}
-  \item \textbf{Class-incrémental} : F1 final modeste (0,16--0,17) — déséquilibre
-  extrême entre classes rares et dominantes.
-  \item \textbf{Cross-domain} : oubli marqué à l'arrivée de PAMAP2 (tâches 37--44).
-  \item \textbf{Anticipation} : macro-F1 multi-classe d'environ 0,60--0,64 selon $p$.
-  \item \textbf{Chutes} : proxy HAPT (fall-risk transitions), pas de chutes réelles
-  (MobiAct en perspective) ; repas non entraînable sans corpus cuisine.
-  \item \textbf{SSL / foundation / RL} : modules légers démonstratifs, pas un FM
-  public ni du deep RL.
-\end{itemize}
+Le class-incrémental reste le point faible : le F1 final est bas quand les
+classes rares et dominantes se mélangent mal. L'arrivée de PAMAP2 (tâches
+37--44) fait encore beaucoup oublier. L'anticipation multi-classe plafonne
+autour de 0,60--0,64 selon $p$. Le fall-risk repose sur des transitions
+HAPT, pas sur des chutes cliniques. SSL, foundation-style et bandit sont des
+versions légères. Sans corpus cuisine, le scénario repas n'est pas entraînable.
 
 \subsection{Perspectives d'amélioration}
 
-Trois axes ressortent des expériences pour un déploiement réel.
-
-\textbf{Tampon domain-aware.} L'oubli PAMAP2 (tâches 37--44) suggère d'étiqueter
-les exemples du rejeu par domaine capteur et de garantir un quota minimum lors
-de l'échantillonnage UWR. Un \texttt{DomainAdapter} (ou CORAL bibliographique)
-intermédiaire avant chaque nouveau domaine pourrait stabiliser les embeddings.
-
-\textbf{Anticipation.} Améliorer le contexte temporel et le déséquilibre
-(oversampling des transitions, entraînement conjoint plus poussé) pour relever
-le macro-F1 au-delà de $\approx$0,64.
-
-\textbf{Validation chutes et ADLs.} Intégrer MobiAct pour les chutes réelles et
-un corpus cuisine (Opportunity / Cooking) pour le scénario repas clôtureraient
-les exemples d'application de la fiche.
+Pour un usage réel, trois pistes semblent prioritaires. D'abord, étiqueter
+les exemples du rejeu par domaine capteur pour mieux tenir face à PAMAP2.
+Ensuite, pousser l'anticipation (oversampling des transitions, entraînement
+conjoint plus long). Enfin, valider sur MobiAct pour les chutes et, si
+possible, sur un jeu cuisine pour le scénario repas de la fiche.
 
 \section{Conclusion}
 
-Les expériences confirment la chaîne conception (ch.~4) $\rightarrow$ implémentation
-(ch.~5) : backbone compétitif, UWR efficace, anticipation LSTM opérationnelle
-mais encore limitée ; l'adaptation de domaine reste un levier cross-capteur. Les axes
-d'amélioration (tampon plus grand, MobiAct, anticipation) sont identifiés
-pour la suite.
+Les expériences confirment l'essentiel : le backbone tient la route, UWR
+réduit clairement l'oubli, l'anticipation LSTM dépasse une baseline naïve
+sans être encore assez sûre pour une alerte médicale, et le cross-dataset
+montre un vrai domain shift. La suite logique est un tampon plus conscient
+du domaine, MobiAct, et un travail plus poussé sur l'anticipation.
