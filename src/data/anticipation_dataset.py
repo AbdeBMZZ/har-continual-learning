@@ -36,7 +36,7 @@ def _build_subject_sequences(
     """Build anticipation samples from one subject's contiguous windows."""
     contexts, targets = [], []
 
-    for i in range(seq_len, len(X) - 1):
+    for i in range(seq_len, len(X)):
         ctx_wins = X[i - seq_len: i]
         if truncate_from == "end":
             # Keep the last obs_len samples — transition cues are often late
@@ -81,6 +81,12 @@ class AnticipationDataset:
                  truncate_from: str = "end"):
 
         self.obs_ratio = obs_ratio
+        if not 0 < obs_ratio <= 1 or seq_len < 1:
+            raise ValueError("obs_ratio must be in (0, 1] and seq_len must be positive")
+        if truncate_from not in {"start", "end"}:
+            raise ValueError("truncate_from must be 'start' or 'end'")
+        if subjects is None:
+            raise ValueError("Subject IDs are required; random windows are not temporal sequences")
         self.seq_len   = seq_len
         self.truncate_from = truncate_from
         T              = X.shape[1]
@@ -97,7 +103,7 @@ class AnticipationDataset:
             for subj in np.unique(subjects):
                 mask = subjects == subj
                 X_s, y_s = X[mask], y[mask]
-                if len(X_s) <= seq_len + 1:
+                if len(X_s) <= seq_len:
                     continue
                 ctx, tgt = _build_subject_sequences(
                     X_s, y_s, self.obs_len, seq_len, transitions_only,
@@ -190,8 +196,14 @@ def build_anticipation_datasets(
 
     rng = np.random.default_rng(seed)
 
+    if subjects is None:
+        raise ValueError("Subject IDs are required for a disjoint anticipation split")
+    if not 0 < test_ratio < 1:
+        raise ValueError("test_ratio must be in (0, 1)")
     if subjects is not None:
         unique_subjects = np.unique(subjects)
+        if len(unique_subjects) < 2:
+            raise ValueError("At least two subjects are needed for a subject-disjoint split")
         rng.shuffle(unique_subjects)
         n_val = max(1, int(len(unique_subjects) * test_ratio))
         val_subjects  = set(unique_subjects[:n_val])

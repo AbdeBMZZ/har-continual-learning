@@ -112,8 +112,9 @@ class OnlineCalibrator:
         if logits.dim() == 1:
             logits = logits.unsqueeze(0)
         y = torch.tensor([true_label], dtype=torch.long)
-        self.temp.update(logits.detach(), y)
+        # Assess the prediction before using its ground truth for calibration.
         pred, conf, accepted = self.predict(logits)
+        self.temp.update(logits.detach(), y)
         if accepted:
             self.threshold.update(pred == true_label, conf)
         self.buffer_logits.append(logits.detach().cpu().squeeze(0))

@@ -113,13 +113,18 @@ class ContinualResultsMatrix:
         Positive FWT → learning earlier tasks helps future tasks.
         """
         T   = self.n_tasks
+        if random_baseline is None:
+            return float("nan")  # unmeasured, not zero and not 1/task_index
+        random_baseline = np.asarray(random_baseline, dtype=float)
+        if random_baseline.shape != (T,):
+            raise ValueError("random_baseline must contain one measured score per task")
         fwt = []
         for i in range(1, T):
             if not np.isnan(self.R[i-1, i]):
-                baseline = (1.0 / max(i, 1)) if random_baseline is None \
-                           else float(random_baseline[i])
-                fwt.append(self.R[i-1, i] - baseline)
-        return float(np.mean(fwt)) if fwt else 0.0
+                baseline = float(random_baseline[i])
+                if np.isfinite(baseline):
+                    fwt.append(self.R[i-1, i] - baseline)
+        return float(np.mean(fwt)) if fwt else float("nan")
 
     def forgetting(self) -> float:
         """
@@ -136,7 +141,7 @@ class ContinualResultsMatrix:
                 forgetting.append(float(np.max(valid) - valid[-1]))
         return float(np.mean(forgetting)) if forgetting else 0.0
 
-    def intransigence(self) -> float:
+    def intransigence(self, joint_upper_bound: Optional[np.ndarray] = None) -> float:
         """
         Intransigence = mean of (R_joint[j] - R[j, j])
 
@@ -146,8 +151,14 @@ class ContinualResultsMatrix:
 
         Note: computed only if joint diagonal was recorded (R[j,j] must exist).
         """
-        diag = [self.R[j, j] for j in range(self.n_tasks) if not np.isnan(self.R[j, j])]
-        return float(np.mean(diag)) if diag else 0.0
+        if joint_upper_bound is None:
+            return float("nan")
+        joint = np.asarray(joint_upper_bound, dtype=float)
+        if joint.shape != (self.n_tasks,):
+            raise ValueError("joint_upper_bound must contain one score per task")
+        diag = np.diag(self.R)
+        valid = np.isfinite(joint) & np.isfinite(diag)
+        return float(np.mean(joint[valid] - diag[valid])) if valid.any() else float("nan")
 
     def final_average_accuracy(self) -> float:
         """Mean accuracy across all tasks after training on the last task."""
@@ -159,7 +170,7 @@ class ContinualResultsMatrix:
     def summary(self) -> str:
         lines = [
             "=== Continual Learning Results ===",
-            f"  Final average accuracy : {self.final_average_accuracy():.4f}",
+            f"  Final average score    : {self.final_average_accuracy():.4f}",
             f"  Backward Transfer (BWT): {self.backward_transfer():.4f}",
             f"  Forgetting             : {self.forgetting():.4f}",
             f"  Forward Transfer (FWT) : {self.forward_transfer():.4f}",

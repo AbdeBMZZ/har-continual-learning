@@ -49,6 +49,9 @@ def main():
     parser.add_argument("--epochs",     type=int, default=50)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--lr",         type=float, default=1e-3)
+    parser.add_argument("--seed",       type=int, default=42)
+    parser.add_argument("--uncertainty_replay", action="store_true",
+                        help="Use predictive-entropy weighted replay (not MC Dropout)")
     parser.add_argument("--d_model",    type=int, default=128)
     parser.add_argument("--n_blocks",   type=int, default=4)
     parser.add_argument("--n_heads",    type=int, default=4)
@@ -83,6 +86,7 @@ def main():
         n_heads=args.n_heads,
         n_blocks=args.n_blocks,
         replay_capacity=args.replay,
+        uncertainty_replay=args.uncertainty_replay,
     )
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)

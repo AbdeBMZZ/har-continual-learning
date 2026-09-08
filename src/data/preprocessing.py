@@ -161,16 +161,20 @@ def preprocess_signal(signal: np.ndarray,
     Returns:
         (T_new, C) preprocessed signal at TARGET_HZ in m/s² without gravity
     """
-    # Step 1 — resample
-    signal = resample_signal(signal, original_hz)
+    if signal.ndim != 2 or signal.shape[1] < 3:
+        raise ValueError("Expected (T, C) signal with acceleration in the first 3 channels")
+    if unit not in {"g", "ms2"}:
+        raise ValueError("Acceleration unit must be 'g' or 'ms2'")
+    # All channels are resampled, but physical acceleration operations must
+    # never scale or high-pass the gyroscope (already in rad/s).
+    signal = resample_signal(signal, original_hz).astype(np.float64, copy=True)
 
     # Step 2 — convert to m/s²
     if unit == "g":
-        signal = convert_g_to_ms2(signal)
+        signal[:, :3] = convert_g_to_ms2(signal[:, :3])
 
-    # Step 3 — remove gravity (always applied; if gravity is absent the filter
-    # output is near-zero so subtraction is harmless — matches Amrani 2025)
-    signal = remove_gravity(signal, fs=TARGET_HZ)
+    if has_gravity:
+        signal[:, :3] = remove_gravity(signal[:, :3], fs=TARGET_HZ)
 
     return signal
 

@@ -139,7 +139,7 @@ DATASET_REMAP: Dict[str, Dict[int, int]] = {
 }
 
 DATASET_HAS_GRAVITY = {
-    "hapt":    False,   # gravity removed in original processing
+    "hapt":    True,    # loader reads RawData, not the processed body-acceleration features
     "pamap2":  True,
     "wisdm":   True,
     "mobiact": True,
@@ -258,14 +258,14 @@ def subject_slug(global_id: int, meta: Dict[str, dict]) -> str:
 def build_unified_dataset(data_root: str | Path,
                           datasets: Optional[List[str]] = None,
                           discard_unknown: bool = True,
-                          normalize: bool = True):
+                          normalize: bool = False):
     """Load, homogenize, and merge all available datasets.
 
     Args:
         data_root: path to the data/raw/ directory
         datasets: list of dataset names to load (None = all available)
         discard_unknown: drop windows with label == 0
-        normalize: z-score normalize per dataset (using training split stats)
+        normalize: legacy full-corpus normalization (unsafe for held-out evaluation)
 
     Returns:
         X:         (N, WINDOW_SIZE, 6)  float32
@@ -275,6 +275,11 @@ def build_unified_dataset(data_root: str | Path,
         stats:     dict of (mean, std) per dataset for later normalization
         subject_meta: dict global_id → {dataset, local_id, slug}
     """
+    if normalize:
+        raise ValueError(
+            "Full-corpus normalization leaks held-out statistics. Use normalize=False; "
+            "fit any scaler on the training partition only, then reuse it unchanged."
+        )
     data_root = Path(data_root)
     if datasets is None:
         datasets = list(DATASET_REGISTRY)
@@ -290,9 +295,6 @@ def build_unified_dataset(data_root: str | Path,
             print(f"[{name}] folder not found — skipping")
             continue
 
-        _, hz, unit = DATASET_REGISTRY[name]
-        samples, _, _ = load_dataset(name, folder), hz, unit  # reload cleanly
-        # Actually call load_dataset properly
         samples, hz, unit = load_dataset(name, folder)
 
         if not samples:

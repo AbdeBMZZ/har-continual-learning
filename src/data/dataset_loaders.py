@@ -125,7 +125,8 @@ def load_hapt(root: str | Path) -> List[Sample]:
 # Files: subject101.dat … subject109.dat
 # Columns: timestamp, activity_id, heart_rate,
 #          then groups of (temp, acc1_x, acc1_y, acc1_z, acc2_x, ..., gyro_x, gyro_y, gyro_z, ...)
-# We use columns for the hand IMU (wrist): acc2 (cols 21-23) and gyro (cols 27-29) — 100 Hz
+# Zero-based hand IMU columns: acc ±16g = 4:7, gyro = 10:13.
+# Source: UCI PAMAP2 readme.pdf (one-based columns 4–20 = hand IMU).
 
 PAMAP2_LABELS = {
     1: "lying", 2: "sitting", 3: "standing", 4: "walking",
@@ -154,11 +155,10 @@ def load_pamap2(root: str | Path) -> List[Sample]:
 
         activity = df.iloc[:, 1].values.astype(np.int32)
 
-        # wrist IMU: acc (cols 21-23, m/s²) + gyro (cols 27-29, rad/s)
-        # Some files use 0-indexed differently; fall back gracefully
+        # Hand IMU, matching the documented placement (not chest IMU).
         try:
-            acc  = df.iloc[:, 21:24].values.astype(np.float32)
-            gyro = df.iloc[:, 27:30].values.astype(np.float32)
+            acc  = df.iloc[:, 4:7].values.astype(np.float32)
+            gyro = df.iloc[:, 10:13].values.astype(np.float32)
         except Exception:
             continue
 

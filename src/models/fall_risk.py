@@ -1,12 +1,10 @@
 """
-Fall-risk anticipation and simple physical fall heuristic.
+Postural-transition prediction prototype (legacy API names retained).
 
-Fiche PFE mentions preventive fall / loss-of-balance alerts.
-We do NOT predict "fall" class 13 (absent from current processed merge).
-Instead we anticipate *fall-risk postural transitions*:
-  stand_to_sit, sit_to_stand, sit_to_lie, lie_to_sit  (labels 9–12).
-
-Also provides a lightweight magnitude-based PhysicalFallDetector for demo.
+Labels 9–12 are ordinary posture transitions. They are NOT ground-truth fall
+risk, instability or loss of balance. Scores trained on these targets must not
+be reported as fall-prevention performance. PhysicalFallDetector is only an
+unvalidated heuristic requiring acceleration in g, not standardized windows.
 """
 
 from __future__ import annotations
@@ -22,7 +20,7 @@ FALL_RISK_LABELS: Set[int] = {9, 10, 11, 12}
 
 
 class FallRiskHead(nn.Module):
-    """Binary head: P(next activity is a fall-risk transition)."""
+    """Binary head for the chosen posture-transition proxy; not a fall-risk probability."""
 
     def __init__(self, d_model: int = 128, lstm_hidden: int = 64,
                  lstm_layers: int = 1, dropout: float = 0.2):

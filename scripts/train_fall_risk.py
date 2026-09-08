@@ -107,7 +107,7 @@ def main():
                 B, S, T, C = X_seq.shape
                 emb = model.backbone(X_seq.view(B * S, T, C)).view(B, S, -1)
                 logit = head(emb)[0]
-                logits2 = torch.stack([-logit.cpu(), logit.cpu()])
+                logits2 = torch.stack([torch.zeros_like(logit.cpu()), logit.cpu()])
                 prob = torch.sigmoid(logit).item()
                 is_pos = bool(labels_to_fall_risk(y_next.numpy())[0] > 0.5)
             bandit.step(confidence=prob, is_positive=is_pos)

@@ -53,6 +53,13 @@ class UncertaintyWeightedReplayBuffer(ReplayBuffer):
         self.update_freq  = update_freq
         self._call_count  = 0
         self._scores: Optional[np.ndarray] = None
+        self._mean_entropy = float("nan")
+
+    def add_batch(self, X: np.ndarray, y: np.ndarray):
+        super().add_batch(X, y)
+        # The parent can reorder or replace entries even when length is unchanged.
+        self._scores = None
+        self._mean_entropy = float("nan")
 
     # ------------------------------------------------------------------
     # Calcul des scores d'incertitude
@@ -73,18 +80,22 @@ class UncertaintyWeightedReplayBuffer(ReplayBuffer):
         if len(self) == 0:
             return np.array([])
 
-        model.eval()
+        modes = [(module, module.training) for module in model.modules()]
         entropies = []
-
-        X = self._X  # (N, T, C)
-        for start in range(0, len(X), batch_size):
-            batch = torch.from_numpy(X[start:start + batch_size]).to(device)
-            logits = model(batch)                          # (B, n_classes)
-            probs  = F.softmax(logits, dim=-1)             # (B, n_classes)
-            H      = -(probs * (probs + 1e-10).log()).sum(dim=-1)  # (B,)
-            entropies.append(H.cpu().numpy())
+        try:
+            model.eval()
+            X = self._X
+            for start in range(0, len(X), batch_size):
+                batch = torch.from_numpy(X[start:start + batch_size]).to(device)
+                probs = F.softmax(model(batch), dim=-1)
+                entropy = -(probs * (probs + 1e-10).log()).sum(dim=-1)
+                entropies.append(entropy.cpu().numpy())
+        finally:
+            for module, training in modes:
+                module.training = training
 
         scores = np.concatenate(entropies)                 # (N,)
+        self._mean_entropy = float(scores.mean())
         # Normalise pour obtenir une distribution de probabilité
         scores = scores ** self.alpha
         total  = scores.sum()
@@ -141,8 +152,5 @@ class UncertaintyWeightedReplayBuffer(ReplayBuffer):
         return X_sample, y_sample
 
     def mean_uncertainty(self) -> float:
-        """Retourne l'entropie moyenne actuelle du buffer (indicateur d'oubli)."""
-        if self._scores is None or len(self._scores) == 0:
-            return 0.0
-        # Re-normalise les scores bruts pour obtenir H moyen
-        return float(np.mean(self._scores) * len(self._scores))
+        """Mean raw predictive entropy; NaN until scores have been computed."""
+        return self._mean_entropy

@@ -60,12 +60,14 @@ class HARDataset:
     # Splits
     # ------------------------------------------------------------------
 
-    def train_test_split(self, test_ratio: float = 0.2, seed: int = 42):
+    def train_test_split(self, test_ratio: float = 0.2, seed: int = 42, gap_windows: int = 1):
         """Split dataset into train/test.
 
         If more than one subject exists: split by subject (no leakage).
-        If only one subject (e.g. single-user task): split by sample index.
+        If one subject: chronological split with a purge gap (one window for 50% overlap).
         """
+        if not 0 < test_ratio < 1 or gap_windows < 0:
+            raise ValueError("Require 0 < test_ratio < 1 and gap_windows >= 0")
         rng = np.random.default_rng(seed)
         unique_subjects = np.unique(self.subjects)
 
@@ -75,12 +77,15 @@ class HARDataset:
             test_subjects = set(unique_subjects[:n_test])
             train_mask    = np.array([s not in test_subjects for s in self.subjects])
         else:
-            # Single subject — split by sample index
-            idx       = np.arange(len(self.X))
-            rng.shuffle(idx)
-            n_test    = max(1, int(len(idx) * test_ratio))
-            test_idx  = set(idx[:n_test])
-            train_mask = np.array([i not in test_idx for i in range(len(self.X))])
+            # Chronological holdout, with a purge for the default 50% overlap.
+            # Assumes windows retain source order. This does not repair upstream
+            # non-causal filtering or recover discarded recording boundaries.
+            n_test = max(1, int(len(self.X) * test_ratio))
+            cut = len(self.X) - n_test
+            if cut <= gap_windows:
+                raise ValueError("Too few windows for a chronological split with a purge gap")
+            return (self._subset(np.arange(cut - gap_windows)),
+                    self._subset(np.arange(cut, len(self.X))))
 
         return self._subset(train_mask), self._subset(~train_mask)
 

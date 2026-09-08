@@ -1,21 +1,20 @@
-# Couverture fiche PFE ↔ code
+# Couverture de la fiche PFE — audit du 8 septembre 2026
 
-| Élément fiche | Statut | Où |
-|---------------|--------|-----|
-| HAR IMU + Transformer | OK | `src/models/backbone.py` |
-| Apprentissage continu / forgetting | OK | UWR, replay, prototypes |
-| Anticipation activité (signaux partiels) | OK | LSTM, F1 ~0.59–0.64 |
-| Mémoire externe / attention | OK | prototypes + Transformer |
-| Fine-tuning adaptatif | OK | pretrain → continual |
-| **SSL auto-supervisé** | Ajouté | `scripts/train_ssl.py`, `src/training/ssl_pretrain.py` |
-| **Foundation-style** (prétrain→adapt, échelle datasets) | Ajouté | `scripts/train_foundation_style.py` |
-| **Calibration adaptative en ligne** | Ajouté | `src/models/online_calibration.py` |
-| **Anticipation risque de chute / équilibre** | Ajouté | transitions 9–12, `scripts/train_fall_risk.py` |
-| **RL léger** (bandit de seuil d’alerte) | Ajouté | `src/training/rl_threshold_agent.py` |
-| **Préparation de repas** | Indispo. données | `src/scenarios/adl_scenarios.py` |
+Présence de code ≠ validation de l'objectif. Voir `audit_pfe_2026-09-08.md`.
 
-## Limites honnêtes
-- Pas un foundation model public (données/compute insuffisants).
-- RL = bandit de seuil, pas deep RL.
-- Fall-risk = transitions posturales HAPT (pas classe `fall` absente du merge).
-- Repas = scénario fiche uniquement tant qu’il n’y a pas de corpus cuisine.
+| Objectif de la fiche | État constaté |
+|---|---|
+| HAR inertielle, Transformer | Implémentation présente ; données corrigées à régénérer |
+| Nouveaux utilisateurs et nouvelles classes | Scénarios présents ; partitions et pré-entraînement à consolider |
+| Mémoire externe et maintien des connaissances | Rejeu et prototypes présents ; performances à réévaluer |
+| Adaptation contextuelle | CORAL présent ; comparaison à budget de labels égal à documenter |
+| Auto-supervision | SSL contrastif présent ; exclusion du test avant SSL à imposer |
+| Modèle de fondation | Petit pipeline pré-entraînement/adaptation, pas un modèle de fondation démontré |
+| Calibration en ligne | Module présent ; feedback étiqueté nécessaire, validation dédiée manquante |
+| Anticipation d'activités | Tête LSTM présente ; sessions, chevauchement et horizon futur non sécurisés |
+| Prévention de perte d'équilibre | Non validée : transitions posturales ≠ perte d'équilibre |
+| Préparation de repas | Non couverte par les classes conservées dans le mapping actuel |
+| Renforcement | Démonstrateur de bandit de seuil, pas une validation préventive |
+
+La fiche propose plusieurs familles de méthodes : elle n'oblige pas à implémenter
+toutes les variantes ni à appeler un petit encodeur un modèle de fondation.

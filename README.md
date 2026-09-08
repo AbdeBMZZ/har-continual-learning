@@ -4,12 +4,16 @@
 
 ---
 
+## Protocole PFE strict (HAPT)
+
+Le nouveau parcours séparant les sujets, conservant les sessions et évaluant une fenêtre réellement future est décrit dans [le protocole HAPT](docs/protocole_hapt_strict.md). Son entraînement reste à valider avec PyTorch ; les anciens résultats ne constituent pas sa validation.
+
 ## Overview
 
 A two-headed deep learning system for **Human Activity Recognition (HAR)** from wearable IMU sensors that:
 
-1. **Recognizes activities continually** — adapts to new users, new activities, and new contexts without forgetting old ones (no catastrophic forgetting)
-2. **Anticipates future activities** — predicts the next activity from partial/ambiguous signal windows (e.g., detects imminent falls before they happen)
+1. **Recognizes activities continually** — adapts to new users, new activities, and new contexts while aiming to limit forgetting (requires measured validation)
+2. **Anticipates future activities** — predicts the next activity from partial/ambiguous signal windows (postural-transition prediction is not validated fall prevention)
 
 ### Architecture
 
@@ -72,7 +76,7 @@ Four public IMU datasets, homogenized to a unified format (50 Hz, m/s², 3s wind
 | [HAPT](https://archive.ics.uci.edu/ml/datasets/Human+Activity+Recognition+Using+Smartphones) | 6 ADLs + transitions | 30 | 50 |
 | [MobiAct](https://bmi.hmu.gr/the-mobiact-dataset-v2-0/) | 9 ADLs + falls | 57 | 87 |
 | [PAMAP2](https://archive.ics.uci.edu/ml/datasets/PAMAP2+Physical+Activity+Monitoring) | 18 activities | 9 | 100 |
-| [WISDM](https://www.cis.fordham.edu/wisdm/dataset.php) | 6 ADLs | 51 | 20 |
+| [WISDM](https://www.cis.fordham.edu/wisdm/dataset.php) | 6 ADLs (legacy AR v1.1) | 36 in the full release; verify loaded subset | 20 |
 
 ---
 
@@ -130,3 +134,15 @@ streamlit run app_streamlit.py
 ## License
 
 MIT
+
+## PFE audit — 2026-09-08
+
+See [the audit](docs/audit_pfe_2026-09-08.md) before interpreting existing figures.
+The checked-out code and the earlier manuscript differ: UWR currently uses
+single-pass predictive entropy, not Monte Carlo Dropout. Regenerate processed
+arrays after the preprocessing fixes; old checkpoints/results are not comparable
+without rerunning the same corrected protocol. Normalization on the full corpus
+is disabled. Any scaler must be fitted on training data only.
+
+Run lightweight regression tests with `python -m unittest discover -s tests -v`.
+Use `--uncertainty_replay` in `scripts/train.py` to explicitly enable UWR.

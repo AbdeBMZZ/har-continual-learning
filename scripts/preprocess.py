@@ -25,7 +25,7 @@ def main():
     parser.add_argument("--datasets", nargs="*", default=None,
                         help="Which datasets to process (default: all found)")
     parser.add_argument("--no_normalize", action="store_true",
-                        help="Skip per-dataset z-score normalization")
+                        help="Compatibility flag: full-corpus normalization is now always disabled")
     args = parser.parse_args()
 
     data_root = Path(args.data_root)
@@ -39,7 +39,7 @@ def main():
         data_root=data_root,
         datasets=args.datasets,
         discard_unknown=True,
-        normalize=not args.no_normalize,
+        normalize=False,
     )
 
     print(f"\nTotal windows: {len(X)}")
